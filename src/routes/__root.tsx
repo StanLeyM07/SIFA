@@ -84,6 +84,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "Sifa tracks your income and spending, shows you exactly where it's going, and tells you in plain language what to do about it. No bank connection required.",
       },
       { name: "author", content: "Sifa" },
+      { name: "theme-color", content: "#16231C" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-title", content: "Sifa" },
+      { name: "mobile-web-app-capable", content: "yes" },
       { property: "og:site_name", content: "Sifa" },
       { property: "og:title", content: "Sifa — your money, explained" },
       {
@@ -103,6 +108,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { rel: "apple-touch-icon", href: "/icon-192.png", sizes: "192x192" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       {
         rel: "preconnect",
@@ -114,6 +122,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: "https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;1,500&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
       },
     ],
+
   }),
   shellComponent: RootShell,
   component: RootComponent,
