@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppGoalsRouteImport } from './routes/_app.goals'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 
 const ActivateRoute = ActivateRouteImport.update({
@@ -28,6 +29,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppGoalsRoute = AppGoalsRouteImport.update({
+  id: '/goals',
+  path: '/goals',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -38,11 +44,13 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activate': typeof ActivateRoute
   '/dashboard': typeof AppDashboardRoute
+  '/goals': typeof AppGoalsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activate': typeof ActivateRoute
   '/dashboard': typeof AppDashboardRoute
+  '/goals': typeof AppGoalsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -50,13 +58,20 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/activate': typeof ActivateRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/goals': typeof AppGoalsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/activate' | '/dashboard'
+  fullPaths: '/' | '/activate' | '/dashboard' | '/goals'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/activate' | '/dashboard'
-  id: '__root__' | '/' | '/_app' | '/activate' | '/_app/dashboard'
+  to: '/' | '/activate' | '/dashboard' | '/goals'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/activate'
+    | '/_app/dashboard'
+    | '/_app/goals'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -88,6 +103,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/goals': {
+      id: '/_app/goals'
+      path: '/goals'
+      fullPath: '/goals'
+      preLoaderRoute: typeof AppGoalsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboard': {
       id: '/_app/dashboard'
       path: '/dashboard'
@@ -100,10 +122,12 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppDashboardRoute: typeof AppDashboardRoute
+  AppGoalsRoute: typeof AppGoalsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppDashboardRoute: AppDashboardRoute,
+  AppGoalsRoute: AppGoalsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
