@@ -8,8 +8,10 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
+
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
@@ -84,6 +86,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "Sifa tracks your income and spending, shows you exactly where it's going, and tells you in plain language what to do about it. No bank connection required.",
       },
       { name: "author", content: "Sifa" },
+      { name: "theme-color", content: "#16231C" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-title", content: "Sifa" },
+      { name: "mobile-web-app-capable", content: "yes" },
       { property: "og:site_name", content: "Sifa" },
       { property: "og:title", content: "Sifa — your money, explained" },
       {
@@ -103,6 +110,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { rel: "apple-touch-icon", href: "/icon-192.png", sizes: "192x192" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       {
         rel: "preconnect",
@@ -114,6 +124,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: "https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;1,500&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
       },
     ],
+
   }),
   shellComponent: RootShell,
   component: RootComponent,
@@ -138,10 +149,30 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
+  useEffect(() => {
+    // Guarded service-worker registration: production only, not inside Lovable preview / iframes.
+    if (typeof window === "undefined") return;
+    if (!("serviceWorker" in navigator)) return;
+    if (!import.meta.env.PROD) return;
+    if (window.self !== window.top) return;
+    const host = window.location.hostname;
+    const isLovablePreview =
+      host.startsWith("id-preview--") ||
+      host.startsWith("preview--") ||
+      host.endsWith(".lovableproject.com") ||
+      host.endsWith(".lovableproject-dev.com") ||
+      host.endsWith(".beta.lovable.dev");
+    if (isLovablePreview) return;
+    if (new URLSearchParams(window.location.search).has("sw")) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <Toaster position="top-center" richColors />
     </QueryClientProvider>
   );
 }
+
