@@ -77,6 +77,34 @@ for (const [desc, amt] of [
   console.log(`${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 44)} -> ${m.category}`);
 }
 
+// Money between *people* is income or spending, not movement. Transfers is
+// excluded from every derived total, so a bank name or a person-to-person
+// rail landing there erases real money: "CAPITEC Y FAN" is a R3 200 payment
+// from another person, and matching the bank name filed it as a self-transfer
+// until the dashboard reported R0 income for the month.
+console.log("\n── money between people is not movement ──");
+for (const [desc, amt, want] of [
+  ["CAPITEC Y FAN", 3200, "income"],
+  ["CAPITEC *** Y FAN 12H03", 3200, "income"],
+  ["PAYSHAP PAYMENT FROM T MOKOENA", 500, "income"],
+  ["PAYSHAP PAYMENT TO T MOKOENA", -500, "expense"],
+  ["INSTANT MONEY VOUCHER", -250, "expense"],
+] as Array<[string, number, string]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category !== "Transfers" && m.type === want;
+  if (!ok) fails++;
+  console.log(
+    `${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 34).padEnd(34)} -> ${m.category}/${m.type}`,
+  );
+}
+
+// A bank name must still reach bank fees when that is what the line says.
+const bankFee = categorizeOne("CAPITEC BANK FEE", -50);
+if (bankFee.category !== "Bank fees") fails++;
+console.log(
+  `${bankFee.category === "Bank fees" ? "PASS" : "FAIL"}  CAPITEC BANK FEE -> ${bankFee.category}`,
+);
+
 // Type inference on income
 const sal = categorizeOne("SALARY ACB CREDIT OCT", 25000);
 console.log(`\nincome type: ${sal.type} (expect income)`);

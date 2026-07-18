@@ -174,8 +174,20 @@ export const MERCHANT_RULES: MerchantRule[] = [
   { merchant: "Deposit", aliases: ["CASH DEPOSIT", "DEPOSIT", "CASH DEP", "ATM CASH DEPOSIT", "CASH ACCEPTED"], category: "Deposits" },
 
   // ── Transfers ─────────────────────────────────────────────
-  // Money moving between accounts or people — real, but not "spending".
-  { merchant: "Transfer", aliases: ["IB TRANSFER", "IB PAYMENT", "CAPITEC", "CREDIT TRANSFER", "IMMEDIATE TRANSFER", "INTERNAL TRANSFER", "PAYSHAP", "PAYSHAP PAYMENT", "INSTANT MONEY", "EWALLET", "E WALLET"], category: "Transfers" },
+  // Strictly money moving between the account holder's OWN accounts. The
+  // Transfers category is excluded from income and spending (see
+  // MOVEMENT_CATEGORIES), so anything filed here disappears from what someone
+  // earned and spent — it must be movement and nothing else.
+  //
+  // "CAPITEC" was here and is now gone: it is a bank name, which says nothing
+  // about who owns the account. It matched "CAPITEC Y FAN", a R3 200 payment
+  // from another person, and filed real income as a self-transfer.
+  { merchant: "Transfer", aliases: ["IB TRANSFER", "IB PAYMENT", "CREDIT TRANSFER", "IMMEDIATE TRANSFER", "INTERNAL TRANSFER"], category: "Transfers" },
+
+  // Person-to-person rails. These move money between *people*, so incoming is
+  // income and outgoing is spending — the sign decides. Filing them as
+  // Transfers hid both sides of real money changing hands.
+  { merchant: "Instant payment", aliases: ["PAYSHAP", "PAYSHAP PAYMENT", "INSTANT MONEY", "EWALLET", "E WALLET"], category: "Other" },
 
   // ── Local merchants seen on real SA statements ────────────
   { merchant: "Yoco (card machine)", aliases: ["YOCO"], category: "Shopping" },
