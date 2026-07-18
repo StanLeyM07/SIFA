@@ -45,6 +45,7 @@ export const CATEGORIES = [
   // spend and the fact that it's worth doing something about.
   "Bank fees",
   "Cash",
+  "Deposits",
   "Transfers",
   "Salary",
   "Freelance",

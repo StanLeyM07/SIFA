@@ -162,8 +162,16 @@ export const MERCHANT_RULES: MerchantRule[] = [
   // "VAS" is the value-added-services prefix SA banks use for airtime/data.
   { merchant: "Airtime / data", aliases: ["VAS VODA", "VAS MTN", "VAS CELLC", "VAS TELKOM", "PREPAID AIRTIME", "AIRTIME", "PREPAID MOBILE", "DATA BUNDLE", "PREPAID DATA", "DATA"], category: "Airtime & data" },
 
-  // ── Cash ──────────────────────────────────────────────────
-  { merchant: "Cash withdrawal", aliases: ["AUTOBANK CASH WITHDRAWAL", "CASH WITHDRAWAL", "ATM WITHDRAWAL", "CASH DEPOSIT", "AUTOBANK"], category: "Cash" },
+  // ── Cash out ──────────────────────────────────────────────
+  // Deliberately not treated as movement: the money left the account and gets
+  // spent in the world, so counting it as spending is the closest honest
+  // approximation available.
+  { merchant: "Cash withdrawal", aliases: ["AUTOBANK CASH WITHDRAWAL", "CASH WITHDRAWAL", "ATM WITHDRAWAL", "AUTOBANK"], category: "Cash" },
+
+  // ── Cash in ───────────────────────────────────────────────
+  // Listed before the withdrawal rule matters little (longest alias wins),
+  // but kept separate because money arriving is not money leaving.
+  { merchant: "Deposit", aliases: ["CASH DEPOSIT", "DEPOSIT", "CASH DEP", "ATM CASH DEPOSIT", "CASH ACCEPTED"], category: "Deposits" },
 
   // ── Transfers ─────────────────────────────────────────────
   // Money moving between accounts or people — real, but not "spending".

@@ -468,6 +468,48 @@ export async function parsePdf(file: File): Promise<ParseResult> {
   };
 }
 
+/**
+ * Account numbers referenced by inter-account transfers.
+ *
+ * A transfer line names the other side: "IB TRANSFER FROM *****2769223".
+ * When the same number appears repeatedly, that's the account holder's second
+ * account — which means we can offer to import its statement without asking
+ * anyone to type an account number.
+ *
+ * Only the masked tail is kept, which is all the statement prints and all
+ * that's needed to tell two accounts apart.
+ */
+export function detectLinkedAccounts(rows: ParsedRow[]): Array<{
+  reference: string;
+  transfers: number;
+  movedIn: number;
+  movedOut: number;
+}> {
+  const found = new Map<string, { transfers: number; movedIn: number; movedOut: number }>();
+
+  for (const row of rows) {
+    if (!/\bIB\s+TRANSFER\b|\bINTERNAL\s+TRANSFER\b|\bTRF\s+(TO|FROM)\b/i.test(row.description)) {
+      continue;
+    }
+    // Masked (*****2769223) or bare account-length digit runs.
+    const match = row.description.match(/\*{2,}\s?(\d{4,})|\b(\d{8,})\b/);
+    const reference = match?.[1] ?? match?.[2];
+    if (!reference) continue;
+
+    const entry = found.get(reference) ?? { transfers: 0, movedIn: 0, movedOut: 0 };
+    entry.transfers++;
+    if (row.amount >= 0) entry.movedIn += row.amount;
+    else entry.movedOut += Math.abs(row.amount);
+    found.set(reference, entry);
+  }
+
+  return [...found.entries()]
+    // One transfer could be to anyone; a repeated destination is an account.
+    .filter(([, v]) => v.transfers >= 2)
+    .sort((a, b) => b[1].transfers - a[1].transfers)
+    .map(([reference, v]) => ({ reference, ...v }));
+}
+
 /** Mostly terminal IDs, card masks and timestamps — no merchant in there. */
 function isWeakDescription(description: string): boolean {
   const letters = description.replace(/[^A-Za-z]/g, "");
