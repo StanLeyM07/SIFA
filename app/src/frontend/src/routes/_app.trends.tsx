@@ -16,6 +16,7 @@ import {
   Cell,
 } from "recharts";
 import { useSifa, formatZAR } from "@/lib/sifa/context";
+import { isMoneyMovement } from "@/lib/sifa/types";
 import { ArrowUpRight, ArrowDownRight, X } from "lucide-react";
 
 interface ChartTileProps {
@@ -165,6 +166,8 @@ function TrendsPage() {
     const foundCategories = new Set<string>();
 
     for (const t of transactions) {
+      // Money moved between the user's own accounts isn't income or spending.
+      if (isMoneyMovement(t.category)) continue;
       const td = new Date(t.date);
       const key = `${td.getFullYear()}-${td.getMonth()}`;
       if (dataMap.has(key)) {

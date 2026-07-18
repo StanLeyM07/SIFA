@@ -1,4 +1,5 @@
 import type { Bill, Goal, Transaction } from "../types";
+import { isMoneyMovement } from "../types";
 
 /**
  * The financial fact sheet handed to the LLM.
@@ -50,6 +51,8 @@ function monthTotals(transactions: Transaction[], key: string) {
 
   for (const t of transactions) {
     if (monthKey(t.date) !== key) continue;
+    // Internal transfers are movement, not earning or spending.
+    if (isMoneyMovement(t.category)) continue;
     count++;
     if (t.type === "income") {
       income += t.amount;
