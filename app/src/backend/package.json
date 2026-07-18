@@ -1,0 +1,30 @@
+{
+  "name": "sifa-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.6.0",
+    "multer": "^2.2.0",
+    "openai": "^4.103.0",
+    "pdf-parse": "^2.4.5",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.18",
+    "@types/express": "^5.0.2",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.16.5",
+    "@types/pdf-parse": "^1.1.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.3"
+  }
+}

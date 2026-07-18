@@ -1,0 +1,101 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Sifa design system.
+ * Warm paper + ledger palette, Fraunces + IBM Plex Sans/Mono.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-emerald: var(--emerald);
+  --color-emerald-deep: var(--emerald-deep);
+  --color-gold: var(--gold);
+  --color-brick: var(--brick);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted);
+  --color-hair: var(--hair);
+
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--ink);
+  --color-primary-foreground: var(--paper);
+  --color-secondary: var(--card);
+  --color-secondary-foreground: var(--ink);
+  --color-accent: var(--emerald);
+  --color-accent-foreground: var(--paper);
+  --color-destructive: var(--brick);
+  --color-destructive-foreground: var(--paper);
+  --color-border: var(--hair);
+  --color-input: var(--hair);
+  --color-ring: var(--emerald);
+}
+
+:root {
+  --radius: 1rem;
+
+  --ink: #16231C;
+  --ink-2: #1E2E24;
+  --paper: #F6F1E6;
+  --card: #FBF8F1;
+  --emerald: #2F6F5E;
+  --emerald-deep: #1E4B3F;
+  --gold: #D89A3D;
+  --brick: #B45B47;
+  --muted: #7A7263;
+  --hair: #DCD3BE;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .sifa-accordion[open] .sifa-accordion-body,
+  .sifa-accordion .sifa-accordion-body {
+    animation: none !important;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--hair);
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--emerald);
+    outline-offset: 2px;
+    border-radius: 999px;
+  }
+}
