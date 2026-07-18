@@ -126,7 +126,7 @@ function TrendsPage() {
   const [savingsRange, setSavingsRange] = useState<number>(5);
   const [spendingRange, setSpendingRange] = useState<number>(5);
 
-  const { allMonthlyData, categoryData, categoryKeys } = useMemo(() => {
+  const { allMonthlyData, categoryKeys } = useMemo(() => {
     // 1. Initialize 12-month window (max possible range)
     const dataMap = new Map<
       string,
@@ -162,7 +162,6 @@ function TrendsPage() {
     }
 
     // 2. Aggregate raw data
-    const catTotalMap = new Map<string, { name: string; amount: number }>();
     const foundCategories = new Set<string>();
 
     for (const t of transactions) {
@@ -178,13 +177,6 @@ function TrendsPage() {
           foundCategories.add(t.category);
         }
       }
-
-      if (t.type === "expense") {
-        catTotalMap.set(t.category, {
-          name: t.category,
-          amount: (catTotalMap.get(t.category)?.amount || 0) + t.amount,
-        });
-      }
     }
 
     // 3. Compute derived metrics
@@ -198,14 +190,8 @@ function TrendsPage() {
       return item;
     });
 
-    // 4. Sort top categories
-    const finalCategoryData = Array.from(catTotalMap.values())
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5);
-
     return {
       allMonthlyData: finalMonthlyData,
-      categoryData: finalCategoryData,
       categoryKeys: Array.from(foundCategories),
     };
   }, [transactions]);
@@ -237,10 +223,21 @@ function TrendsPage() {
   );
 
   const rateData = useMemo(() => getSlicedData(rateRange), [allMonthlyData, rateRange]);
+
+  /**
+   * Rate over the window's totals, not the mean of each month's rate.
+   *
+   * Averaging the percentages weights every month equally regardless of the
+   * money in it: a R100 month where R50 was kept (50%) cancelled out a
+   * R50 000 month where R5 000 was kept (10%) and reported 30%, when the
+   * period actually kept 10%. Summing first is the rate the user can check
+   * against their own income and savings figures.
+   */
   const avgSavingsRate = useMemo(() => {
-    const active = rateData.filter((d) => d.income > 0);
-    if (active.length === 0) return 0;
-    return Math.round(active.reduce((sum, d) => sum + d.savingsRate, 0) / active.length);
+    const income = rateData.reduce((sum, d) => sum + d.income, 0);
+    if (income <= 0) return 0;
+    const saved = rateData.reduce((sum, d) => sum + d.saved, 0);
+    return Math.round((saved / income) * 100);
   }, [rateData]);
 
   const savingsData = useMemo(() => getSlicedData(savingsRange), [allMonthlyData, savingsRange]);
@@ -560,13 +557,13 @@ function TrendsPage() {
                   wrapperStyle={{ zIndex: 100 }}
                 />
                 <Bar
-                  dataKey="amount"
+                  dataKey="value"
                   name="Total Spent"
                   fill="#D89A3D"
                   radius={[0, 4, 4, 0]}
                   barSize={24}
                 >
-                  {categoryData.map((entry, index) => (
+                  {localCategoryData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[entry.name] || "#D89A3D"} />
                   ))}
                 </Bar>
@@ -578,7 +575,6 @@ function TrendsPage() {
             </div>
           )}
         </ChartTile>
-
       </div>
     </div>
   );

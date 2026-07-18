@@ -167,24 +167,45 @@ export function parseAmount(raw: string): number | null {
  *    numbers, card fragments and timestamps don't, so this excludes them
  *    outright. Missing a row is recoverable — the review screen shows totals
  *    to check — whereas inventing R531 600 silently corrupts every figure.
+ *
+ * The integer part is either grouped ("25 400.00", "1,234.56") or an ungrouped
+ * run ("6250.00"). Requiring a group separator — as this did — made every
+ * amount over R999.99 invisible on the many statements that print no
+ * separator, so those rows were dropped whole and the totals came up short.
+ * The lookbehind, not the grouping, is what keeps a reference tail out.
  */
 const AMOUNT_RE =
-  /(?<![\d.,])\(?-?R?\s?\d{1,3}(?:[\s,]\d{3})*[.,]\d{2}-?\)?(?:\s?(?:DR|CR))?/gi;
+  /(?<![\d.,])\(?-?R?\s?(?:\d{1,3}(?:[\s,]\d{3})+|\d+)[.,]\d{2}-?\)?(?:\s?(?:DR|CR))?/gi;
 const DATE_RE =
   /\b(\d{4}-\d{2}-\d{2}|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{1,2}\s?[A-Za-z]{3,9}\.?\s?\d{0,4})\b/;
 
-/** Rows that are statement furniture rather than transactions. */
+/**
+ * Rows that are statement furniture rather than transactions.
+ *
+ * Matched as substrings, so anything here must be a phrase that can never
+ * appear inside a real transaction description.
+ */
 const NOISE = [
   "OPENING BALANCE", "CLOSING BALANCE", "BALANCE BROUGHT", "BALANCE CARRIED",
   "BROUGHT FORWARD", "CARRIED FORWARD", "STATEMENT PERIOD", "AVAILABLE BALANCE",
   "TOTAL CREDITS", "TOTAL DEBITS", "PAGE ", "VAT REG", "ACCOUNT NUMBER",
-  "ACCOUNT HOLDER", "STATEMENT NO", "CONTACT", "CUSTOMER CARE",
+  "ACCOUNT HOLDER", "STATEMENT NO", "CONTACT US", "CUSTOMER CARE",
   // Page furniture repeated on every sheet — these carry a date and were
   // being counted as transactions we failed to read, which produced an
   // alarming "17 lines couldn't be read" on a statement that parsed fine.
   "MONTH STATEMENT", "TRANSACTION DETAILS", "STATEMENT DATE", "PLEASE NOTE",
-  "TERMS AND CONDITIONS", "BANK CHARGES", "INTEREST RATE",
+  "TERMS AND CONDITIONS",
 ];
+
+/**
+ * Phrases that head a footer paragraph but are also things a bank genuinely
+ * charges you for. "BANK CHARGES" and "INTEREST" are line items on almost
+ * every SA statement, and "CONTACT" is a substring of "CONTACTLESS" — matching
+ * them unconditionally deleted real debits and quietly understated spending.
+ *
+ * Footer prose carries no date, so a date is what separates the two.
+ */
+const AMBIGUOUS_NOISE = ["BANK CHARGES", "INTEREST RATE", "SERVICE FEE"];
 
 /** "From: 17 Apr 26", "To: 16 Jul 26" — statement range headers, not rows. */
 const RANGE_HEADER_RE = /^\s*(from|to)\s*:/i;
@@ -198,6 +219,8 @@ function isNoise(line: string): boolean {
   if (NOISE.some((n) => u.includes(n))) return true;
   if (RANGE_HEADER_RE.test(line)) return true;
   if (BARE_DATE_RE.test(line)) return true;
+  // Undated footer prose only — a dated one is the charge itself.
+  if (AMBIGUOUS_NOISE.some((n) => u.includes(n)) && !DATE_RE.test(line)) return true;
   return false;
 }
 
@@ -342,23 +365,45 @@ export interface TextItem {
   y: number;
 }
 
-/** Group text items into visual rows by y-position, then order each by x. */
+/**
+ * Group text items into visual rows by y-position, then order each by x.
+ *
+ * Grouping is by adjacency, not by snapping y to fixed bands. Banding
+ * (`Math.round(y / tolerance)`) puts two spans of the same printed line into
+ * different groups whenever they straddle a band edge — y=700.4 and y=701.9
+ * are 1.5pt apart but round to 233 and 234. pdf.js reports baselines that
+ * differ by a fraction of a point within one row as a matter of course, so
+ * this split real rows in half: the fragment holding the date had no amount
+ * and the fragment holding the amounts had no date, so neither parsed and
+ * neither tripped the "couldn't be read" warning. The transaction just
+ * disappeared, which is exactly the failure the totals were coming up short by.
+ */
 export function itemsToLines(items: TextItem[], tolerance = 3): string[] {
-  const buckets = new Map<number, TextItem[]>();
+  const sorted = items
+    .filter((i) => i.str.trim())
+    // pdf y grows upward, so descending = top-down.
+    .sort((a, b) => b.y - a.y);
 
-  for (const item of items) {
-    if (!item.str.trim()) continue;
-    // Snap to a tolerance band so items on the same printed line group together
-    // even when their baselines differ by a fraction of a point.
-    const key = Math.round(item.y / tolerance);
-    const bucket = buckets.get(key);
-    if (bucket) bucket.push(item);
-    else buckets.set(key, [item]);
+  const rows: TextItem[][] = [];
+  let current: TextItem[] = [];
+  let anchor = 0;
+
+  for (const item of sorted) {
+    // Compare against the row's anchor rather than the previous item, so a run
+    // of slightly-drifting baselines can't creep a row arbitrarily far.
+    if (current.length === 0 || Math.abs(item.y - anchor) <= tolerance) {
+      if (current.length === 0) anchor = item.y;
+      current.push(item);
+    } else {
+      rows.push(current);
+      current = [item];
+      anchor = item.y;
+    }
   }
+  if (current.length > 0) rows.push(current);
 
-  return [...buckets.entries()]
-    .sort((a, b) => b[0] - a[0]) // pdf y grows upward, so descending = top-down
-    .map(([, row]) =>
+  return rows
+    .map((row) =>
       row
         .sort((a, b) => a.x - b.x)
         .map((i) => i.str.trim())

@@ -3,6 +3,7 @@ import {
   parseDate,
   parseAmount,
   lineToRow,
+  itemsToLines,
   detectReconciliation,
   looksLikeMissedTransaction,
 } from "./parse-statement";
@@ -84,6 +85,64 @@ eq("second line amount is 390", sbsa2?.amount, 390);
 // A genuine thousands-separated amount must still parse.
 const big = lineToRow("05 May 26 SALARY DEPOSIT 25 400.00 26 000.00", 2026);
 eq("real thousands amount survives", big?.amount, 25400);
+
+console.log("\n── amounts printed without a thousands separator ──");
+// Requiring a separator made every amount over R999.99 invisible on statements
+// that print none, so those rows were dropped whole and the totals ran short.
+eq("6250.00 parses", parseAmount("6250.00"), 6250);
+const unsep = lineToRow("03 Jun 26 SALARY ACME PAYROLL 6250.00 8420.10", 2026);
+eq("ungrouped row is read", unsep?.amount, 6250);
+eq("ungrouped row keeps its date", unsep?.date, "2026-06-03");
+// The reference-number guard must survive the looser integer part.
+eq(
+  "reference still can't merge into the amount",
+  lineToRow("17 Jun 26 HATFIELD P4 16H58 338279531 600.00 588.66", 2026)?.amount,
+  600,
+);
+
+console.log("\n── fee and card rows are transactions, not furniture ──");
+eq(
+  "dated bank charge is kept",
+  lineToRow("30 Jun 26 BANK CHARGES MONTHLY FEE 130.00 4211.55", 2026)?.amount,
+  130,
+);
+eq(
+  "CONTACTLESS is not a CONTACT header",
+  lineToRow("12 Jun 26 CONTACTLESS PURCHASE WOOLWORTHS 250.00 4461.55", 2026)?.amount,
+  250,
+);
+eq(
+  "undated footer prose still ignored",
+  lineToRow("Bank charges and interest rates are available on request", 2026),
+  null,
+);
+
+console.log("\n── forex rows: the ZAR amount, not the exchange rate ──");
+eq(
+  "picks the amount before the balance",
+  lineToRow("17 Jun 26 OPENAI *CHATGPT SAN FRANCISCO 20.00 18.45 369.00 4030.55", 2026)
+    ?.amount,
+  369,
+);
+
+console.log("\n── PDF rows split across baseline bands ──");
+// pdf.js reports fractionally different baselines within one printed row.
+// Banding by Math.round(y / tolerance) split these into two unparseable
+// halves, losing the transaction with no warning.
+const split = itemsToLines([
+  { str: "17 Jun 26", x: 50, y: 700.4 },
+  { str: "OPENAI *CHATGPT SAN FRANCISCO", x: 120, y: 701.9 },
+  { str: "369.00", x: 400, y: 700.4 },
+  { str: "4030.55", x: 470, y: 700.4 },
+]);
+eq("straddling baselines stay one row", split.length, 1);
+eq("row parses", lineToRow(split[0], 2026)?.amount, 369);
+// Genuinely separate rows must still separate.
+const two = itemsToLines([
+  { str: "17 Jun 26 A 10.00", x: 50, y: 700 },
+  { str: "18 Jun 26 B 20.00", x: 50, y: 680 },
+]);
+eq("distinct rows stay distinct", two.length, 2);
 
 console.log("\n── page furniture must not raise a false warning ──");
 for (const junk of [
