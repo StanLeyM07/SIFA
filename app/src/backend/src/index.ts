@@ -20,13 +20,20 @@ const ORIGINS = (process.env.FRONTEND_ORIGIN || "http://localhost:5174")
 
 app.set("trust proxy", 1);
 
+class OriginNotAllowedError extends Error {
+  constructor() {
+    super("Origin not allowed");
+    this.name = "OriginNotAllowedError";
+  }
+}
+
 app.use(
   cors({
     origin(origin, cb) {
       // Same-origin/curl requests have no Origin header; allow those through
       // so health checks work, but browsers are held to the allow-list.
       if (!origin || ORIGINS.includes(origin)) return cb(null, true);
-      cb(new Error("Origin not allowed"));
+      cb(new OriginNotAllowedError());
     },
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"],
@@ -70,6 +77,12 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // A blocked origin is a client error, not a server fault. Answering 403
+  // quietly also keeps the logs readable once bots start probing the host.
+  if (err instanceof OriginNotAllowedError) {
+    res.status(403).json({ error: "Origin not allowed." });
+    return;
+  }
   console.error("[server] Unhandled error:", err);
   res.status(500).json({ error: "Something went wrong. Please try again." });
 });

@@ -7,27 +7,37 @@
 services:
   - type: web
     name: sifa-api
-    runtime: node
+    runtime: docker
     plan: free
-    rootDir: app/src/backend
-    # Full install (tsc is a devDependency), compile, then drop dev modules.
-    buildCommand: npm ci && npm run build && npm prune --omit=dev
-    startCommand: npm start
+
+    # Both paths are relative to the repo root, and both are required.
+    # dockerfilePath finds the file; dockerContext decides what the COPY lines
+    # inside it resolve against. The Dockerfile expects the backend directory
+    # as its context (COPY package.json ./), which also keeps the image
+    # portable to Fly.io or a VPS unchanged.
+    dockerfilePath: ./app/src/backend/Dockerfile
+    dockerContext: ./app/src/backend
+
     healthCheckPath: /api/health
+
     envVars:
-      - key: NODE_VERSION
-        value: "22"
       # Exact origin of the deployed frontend. Never a wildcard — this is the
       # only thing stopping the internet from spending your LLM credit.
       - key: FRONTEND_ORIGIN
+        sync: false
+      - key: LLM_API_KEY
         sync: false
       - key: LLM_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: LLM_MODEL
         value: llama-3.1-8b-instant
-      - key: LLM_API_KEY
-        sync: false
       # Global ceiling on calls per UTC day — the backstop against a runaway
       # loop or a scraper turning into an invoice.
       - key: LLM_DAILY_CALL_LIMIT
         value: "500"
+
+# Running without Docker instead: set runtime to `node`, rootDir to
+# app/src/backend, drop the two docker* keys, and add
+#   buildCommand: npm ci && npm run build && npm prune --omit=dev
+#   startCommand: npm start
+# Deploys faster, but the image is what makes moving hosts a config change.
