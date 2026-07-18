@@ -1,4 +1,5 @@
 import type { Bill, Goal, Transaction } from "./types";
+import { isMoneyMovement } from "./types";
 import { normalizeDescription } from "./categorize/normalize";
 
 /**
@@ -58,6 +59,9 @@ function totalsForMonth(transactions: Transaction[], key: string): Totals {
 
   for (const t of transactions) {
     if (monthKey(t.date) !== key) continue;
+    // Transfers between the user's own accounts are neither, and counting
+    // them makes someone look like they earned money they merely moved.
+    if (isMoneyMovement(t.category)) continue;
     if (t.type === "income") {
       income += t.amount;
     } else {

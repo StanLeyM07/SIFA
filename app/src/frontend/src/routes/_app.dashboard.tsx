@@ -15,7 +15,7 @@ import { useSifa, formatZAR } from "@/lib/sifa/context";
 import { computeInsights, type InsightTone } from "@/lib/sifa/insights";
 import { getCoachRead, type CoachRead } from "@/lib/sifa/coach/coach.service";
 import { TransactionSheet } from "@/components/sifa/transaction-sheet";
-import type { Transaction } from "@/lib/sifa/types";
+import { isMoneyMovement, type Transaction } from "@/lib/sifa/types";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: DashboardPage,
@@ -47,7 +47,14 @@ function DashboardPage() {
   const stats = useMemo(() => {
     const now = new Date();
     const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const monthTx = transactions.filter((t) => t.date.slice(0, 7) === key);
+    // Internal transfers are movement, not earning or spending — including
+    // them made a real statement report R6 607 income against R990 actual.
+    const monthTx = transactions.filter(
+      (t) => t.date.slice(0, 7) === key && !isMoneyMovement(t.category),
+    );
+    const movement = transactions.filter(
+      (t) => t.date.slice(0, 7) === key && isMoneyMovement(t.category),
+    );
 
     const income = monthTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
     const expenses = monthTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
@@ -64,7 +71,7 @@ function DashboardPage() {
       .slice(0, 6)
       .map(([name, value]) => ({ name, value }));
 
-    return { income, expenses, saved, savedPct, pie, count: monthTx.length };
+    return { income, expenses, saved, savedPct, pie, count: monthTx.length, movementCount: movement.length };
   }, [transactions]);
 
   const insights = useMemo(

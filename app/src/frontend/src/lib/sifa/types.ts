@@ -52,3 +52,26 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+
+/**
+ * Categories that move money rather than earn or spend it.
+ *
+ * Moving R2 000 from a cheque account to savings is not income and not
+ * spending — but it appears on the statement as both a debit and (if the
+ * other account is imported too) a credit. Counting them inflates both sides
+ * and wrecks every derived figure.
+ *
+ * On a real 3-month statement, R5 617 of R6 607 "income" was transfers. Real
+ * income was R990. Every metric downstream — savings rate, what's left over,
+ * the coach's read — was wrong by that margin.
+ *
+ * Cash withdrawals are deliberately NOT here: the money genuinely left the
+ * account and gets spent in the real world, so treating it as spending is
+ * the closest honest approximation available.
+ */
+export const MOVEMENT_CATEGORIES: ReadonlySet<string> = new Set(["Transfers"]);
+
+/** True when a transaction shuffles money rather than earning or spending it. */
+export function isMoneyMovement(category: string): boolean {
+  return MOVEMENT_CATEGORIES.has(category);
+}
