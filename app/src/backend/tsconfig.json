@@ -15,5 +15,7 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  // Smoke tests are run directly with tsx during development; keep them out of
+  // the compiled output so no test code ships in the production image.
+  "exclude": ["node_modules", "dist", "src/**/*.smoke.ts"]
 }
