@@ -17,7 +17,6 @@ import {
   type ParsedRow,
 } from "@/lib/sifa/import/parse-statement";
 import { categorizeAll, type CategorizedRow } from "@/lib/sifa/categorize/engine";
-import { isMoneyMovement } from "@/lib/sifa/types";
 import { recordCorrections } from "@/lib/sifa/services/categorize.service";
 import { storage } from "@/lib/sifa/storage";
 import { CATEGORIES } from "@/lib/sifa/types";
@@ -66,31 +65,16 @@ function ImportPage() {
   );
 
   /**
-   * Two different truths, both shown so the numbers can be traced.
-   *
-   * Money in/out is everything that crossed this account — transfers
-   * included, because moving R2 000 to savings really did leave the account.
-   * That's the figure that reconciles against the statement.
-   *
-   * Income/spending excludes transfers, because money you moved from your own
-   * savings isn't earnings. Without showing both, the dashboard reporting
-   * R990 against a statement showing R6 607 in looks like a bug.
+   * Everything that crossed the account, transfers included — these are the
+   * figures that must reconcile against the statement.
    */
   const totals = useMemo(() => {
     const sum = (f: (r: CategorizedRow) => boolean) =>
       rows.filter(f).reduce((s, r) => s + r.amount, 0);
 
-    const movedIn = sum((r) => r.type === "income" && isMoneyMovement(r.category));
-    const movedOut = sum((r) => r.type === "expense" && isMoneyMovement(r.category));
-
     return {
       income: sum((r) => r.type === "income"),
       expenses: sum((r) => r.type === "expense"),
-      movedIn,
-      movedOut,
-      movedCount: rows.filter((r) => isMoneyMovement(r.category)).length,
-      earned: sum((r) => r.type === "income" && !isMoneyMovement(r.category)),
-      spent: sum((r) => r.type === "expense" && !isMoneyMovement(r.category)),
       needsReview: rows.filter((r) => r.confidence < 0.9).length,
     };
   }, [rows]);
@@ -234,22 +218,12 @@ function ImportPage() {
             <p className="mt-1 font-mono text-xl tabular-nums text-emerald">
               {formatZAR(totals.income)}
             </p>
-            {totals.movedIn > 0 && (
-              <p className="mt-1 text-xs text-muted">
-                incl. {formatZAR(totals.movedIn)} moved from your own accounts
-              </p>
-            )}
           </div>
           <div className="rounded-2xl border border-hair bg-card p-4">
             <p className="text-xs uppercase tracking-widest text-muted">Money out</p>
             <p className="mt-1 font-mono text-xl tabular-nums text-brick">
               {formatZAR(totals.expenses)}
             </p>
-            {totals.movedOut > 0 && (
-              <p className="mt-1 text-xs text-muted">
-                incl. {formatZAR(totals.movedOut)} moved to your own accounts
-              </p>
-            )}
           </div>
           <div className="rounded-2xl border border-hair bg-card p-4">
             <p className="text-xs uppercase tracking-widest text-muted">Need a look</p>
@@ -269,23 +243,6 @@ function ImportPage() {
               — {linkedAccounts[0].transfers} transfers moved between them on this
               statement. Import that statement too and Sifa can show the full picture
               instead of half of it.
-            </p>
-          </div>
-        )}
-
-        {/* Why the dashboard will show smaller numbers than the statement. */}
-        {totals.movedCount > 0 && (
-          <div className="rounded-2xl border border-hair bg-paper/60 p-4 text-sm">
-            <p className="font-medium text-ink">
-              {totals.movedCount} of these are transfers between your own accounts
-            </p>
-            <p className="mt-1 leading-relaxed text-muted">
-              They're real movement on this account, so they're counted above and in
-              your balance. But they aren't income or spending, so your dashboard will
-              show{" "}
-              <strong className="text-ink">{formatZAR(totals.earned)} earned</strong> and{" "}
-              <strong className="text-ink">{formatZAR(totals.spent)} spent</strong> —
-              money you moved from your own savings isn't money you made.
             </p>
           </div>
         )}
