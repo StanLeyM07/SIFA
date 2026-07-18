@@ -88,22 +88,47 @@ hundred tokens instead of a few thousand.
 
 ## Deploying
 
-### Frontend — Vercel / Netlify
+### Frontend — Vercel (static)
 
-- Root: `app/src/frontend`
-- Build: `npm run build`
-- Env: `VITE_API_URL=https://your-api-host`
+The app runs in SPA mode. No user data exists server-side, and rendering is
+gated on client hydration, so a server render could only ever emit the loading
+shell — SPA mode ships that shell as static HTML instead. No serverless
+function, no cold start.
 
-### Backend — Render / Railway / Fly
+In the Vercel dashboard:
 
-- Root: `app/src/backend`
-- Start: `npm start`
-- Env: copy `.env.example`, then set at minimum:
-  - `FRONTEND_ORIGIN` — your real frontend origin. **Never a wildcard.**
-  - `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`
-  - `LLM_DAILY_CALL_LIMIT` — global daily ceiling
+- **Root Directory:** `app/src/frontend`
+- **Framework Preset:** Other (`vercel.json` supplies build + output)
+- **Environment variable:** `VITE_API_URL` → your API URL
 
-Health check: `GET /api/health` reports provider, model and calls used today.
+`vercel.json` handles the rest: output from `dist/client`, SPA rewrites to
+`_shell.html`, immutable caching for hashed assets and no-cache for `sw.js`.
+
+### Backend — Render
+
+Either connect the repo and let `render.yaml` configure the service, or set it
+up manually:
+
+- **Root Directory:** `app/src/backend`
+- **Build:** `npm ci && npm run build && npm prune --omit=dev`
+- **Start:** `npm start` (runs compiled `dist/index.js`)
+- **Health check:** `/api/health`
+
+Set these in the dashboard, never in the repo:
+
+- `FRONTEND_ORIGIN` — your Vercel URL, exactly. **Never a wildcard.**
+- `LLM_API_KEY`
+- (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_DAILY_CALL_LIMIT` come from `render.yaml`)
+
+Deploy the backend first so you have its URL for `VITE_API_URL`. If the API is
+down or absent the app still works — the dashboard falls back to deterministic
+insights.
+
+**Render's free tier sleeps after ~15 minutes idle**, so the first coach
+request after a quiet spell can take 30–60s. The UI degrades gracefully, but
+it's the reason `app/src/backend/Dockerfile` exists: when that becomes
+annoying, the same image runs on Fly.io, Railway or any VPS unchanged. Vercel
+cannot host it — it takes static output and functions, not containers.
 
 ### Before going live
 

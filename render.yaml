@@ -1,0 +1,33 @@
+# Render blueprint for the Sifa API.
+#
+# The backend does one job: turn a sheet of pre-computed figures into prose.
+# It stores nothing, so it needs no disk and no database.
+#
+# Secrets (sync: false) are set in the Render dashboard, never committed.
+services:
+  - type: web
+    name: sifa-api
+    runtime: node
+    plan: free
+    rootDir: app/src/backend
+    # Full install (tsc is a devDependency), compile, then drop dev modules.
+    buildCommand: npm ci && npm run build && npm prune --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Exact origin of the deployed frontend. Never a wildcard — this is the
+      # only thing stopping the internet from spending your LLM credit.
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: LLM_MODEL
+        value: llama-3.1-8b-instant
+      - key: LLM_API_KEY
+        sync: false
+      # Global ceiling on calls per UTC day — the backstop against a runaway
+      # loop or a scraper turning into an invoice.
+      - key: LLM_DAILY_CALL_LIMIT
+        value: "500"
