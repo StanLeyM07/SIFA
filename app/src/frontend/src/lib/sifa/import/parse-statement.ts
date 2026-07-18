@@ -20,8 +20,22 @@ export interface ParseResult {
   rows: ParsedRow[];
   /** Lines that looked like transactions but couldn't be read. */
   skipped: number;
-  /** Statement total if we found one, for reconciliation against our sum. */
-  detectedTotal: number | null;
+  /**
+   * Opening and closing balances read off the statement, when present.
+   *
+   * These let the import prove itself: opening + sum(transactions) must equal
+   * closing. On a real statement this caught a reference number being parsed
+   * as part of an amount, which had inflated income by R531 000 while every
+   * row still looked plausible on screen.
+   */
+  reconciliation: {
+    opening: number;
+    closing: number;
+    net: number;
+    /** Whether opening + net lands on closing, within a cent of rounding. */
+    matches: boolean;
+    difference: number;
+  } | null;
   source: "csv" | "pdf";
   warning?: string;
 }
@@ -136,7 +150,26 @@ export function parseAmount(raw: string): number | null {
   return negative ? -n : n;
 }
 
-const AMOUNT_RE = /\(?-?R?\s?\d{1,3}(?:[\s,]\d{3})*(?:[.,]\d{2})?-?\)?(?:\s?(?:DR|CR))?/gi;
+/**
+ * Money on a statement line.
+ *
+ * Two constraints, both learned from a real Standard Bank statement where a
+ * reference number ran straight into the amount:
+ *
+ *   17 Jun 26 HATFIELD P4 16H58 338279531 600.00 588.66
+ *
+ * Because space doubles as a thousands separator, "…531 600.00" reads as
+ * R531 600 rather than R600 — turning a R600 purchase into six figures.
+ *
+ *  - The lookbehind stops a match beginning part-way through a longer number,
+ *    so the tail of a reference can't become the leading digits of an amount.
+ *  - Decimals are mandatory. Statement amounts always print them; reference
+ *    numbers, card fragments and timestamps don't, so this excludes them
+ *    outright. Missing a row is recoverable — the review screen shows totals
+ *    to check — whereas inventing R531 600 silently corrupts every figure.
+ */
+const AMOUNT_RE =
+  /(?<![\d.,])\(?-?R?\s?\d{1,3}(?:[\s,]\d{3})*[.,]\d{2}-?\)?(?:\s?(?:DR|CR))?/gi;
 const DATE_RE =
   /\b(\d{4}-\d{2}-\d{2}|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{1,2}\s?[A-Za-z]{3,9}\.?\s?\d{0,4})\b/;
 
@@ -146,11 +179,76 @@ const NOISE = [
   "BROUGHT FORWARD", "CARRIED FORWARD", "STATEMENT PERIOD", "AVAILABLE BALANCE",
   "TOTAL CREDITS", "TOTAL DEBITS", "PAGE ", "VAT REG", "ACCOUNT NUMBER",
   "ACCOUNT HOLDER", "STATEMENT NO", "CONTACT", "CUSTOMER CARE",
+  // Page furniture repeated on every sheet — these carry a date and were
+  // being counted as transactions we failed to read, which produced an
+  // alarming "17 lines couldn't be read" on a statement that parsed fine.
+  "MONTH STATEMENT", "TRANSACTION DETAILS", "STATEMENT DATE", "PLEASE NOTE",
+  "TERMS AND CONDITIONS", "BANK CHARGES", "INTEREST RATE",
 ];
+
+/** "From: 17 Apr 26", "To: 16 Jul 26" — statement range headers, not rows. */
+const RANGE_HEADER_RE = /^\s*(from|to)\s*:/i;
+
+/** A bare date on its own line (the statement's print date). */
+const BARE_DATE_RE =
+  /^\s*\d{1,2}\s?[A-Za-z]{3,9}\.?\s?\d{2,4}\s*$|^\s*\d{4}-\d{2}-\d{2}\s*$/;
 
 function isNoise(line: string): boolean {
   const u = line.toUpperCase();
-  return NOISE.some((n) => u.includes(n));
+  if (NOISE.some((n) => u.includes(n))) return true;
+  if (RANGE_HEADER_RE.test(line)) return true;
+  if (BARE_DATE_RE.test(line)) return true;
+  return false;
+}
+
+// ── Reconciliation ───────────────────────────────────────────
+
+const OPENING_RE = /(?:statement\s+)?opening balance|balance brought forward|balance b\/f/i;
+const CLOSING_RE = /(?:statement\s+)?closing balance|balance carried forward|available balance|balance c\/f/i;
+
+/** Last money-shaped token on a line — balances are printed at the right. */
+function trailingAmount(line: string): number | null {
+  const matches = line.match(new RegExp(AMOUNT_RE.source, "gi"));
+  if (!matches || matches.length === 0) return null;
+  return parseAmount(matches[matches.length - 1]);
+}
+
+/**
+ * Read the statement's own opening and closing balances so the import can
+ * check its arithmetic against the bank's. Silent when either is absent —
+ * an unverifiable import is fine, a wrong one is not.
+ */
+export function detectReconciliation(
+  lines: string[],
+  rows: ParsedRow[],
+): ParseResult["reconciliation"] {
+  let opening: number | null = null;
+  let closing: number | null = null;
+
+  for (const line of lines) {
+    if (opening === null && OPENING_RE.test(line)) {
+      const v = trailingAmount(line);
+      if (v !== null) opening = v;
+    }
+    if (CLOSING_RE.test(line)) {
+      const v = trailingAmount(line);
+      // Take the last closing-shaped figure; statements repeat it per page.
+      if (v !== null) closing = v;
+    }
+  }
+
+  if (opening === null || closing === null) return null;
+
+  const net = rows.reduce((s, r) => s + r.amount, 0);
+  const difference = Math.round((opening + net - closing) * 100) / 100;
+
+  return {
+    opening,
+    closing,
+    net: Math.round(net * 100) / 100,
+    matches: Math.abs(difference) < 0.02,
+    difference,
+  };
 }
 
 // ── CSV ──────────────────────────────────────────────────────
@@ -175,7 +273,7 @@ export function parseCsv(text: string): ParseResult {
 
   const rows = parsed.data.filter((r) => Array.isArray(r) && r.length > 0);
   if (rows.length === 0) {
-    return { rows: [], skipped: 0, detectedTotal: null, source: "csv", warning: "The file was empty." };
+    return { rows: [], skipped: 0, reconciliation: null, source: "csv", warning: "The file was empty." };
   }
 
   const headers = rows[0].map((h) => String(h ?? "").trim().toLowerCase());
@@ -233,19 +331,19 @@ export function parseCsv(text: string): ParseResult {
     out.push({ date, description, amount });
   }
 
-  return { rows: out, skipped, detectedTotal: null, source: "csv" };
+  return { rows: out, skipped, reconciliation: null, source: "csv" };
 }
 
 // ── PDF ──────────────────────────────────────────────────────
 
-interface TextItem {
+export interface TextItem {
   str: string;
   x: number;
   y: number;
 }
 
 /** Group text items into visual rows by y-position, then order each by x. */
-function itemsToLines(items: TextItem[], tolerance = 3): string[] {
+export function itemsToLines(items: TextItem[], tolerance = 3): string[] {
   const buckets = new Map<number, TextItem[]>();
 
   for (const item of items) {
@@ -280,7 +378,7 @@ function itemsToLines(items: TextItem[], tolerance = 3): string[] {
  * the amount. We take the earliest amount that isn't the balance, which holds
  * for both layouts.
  */
-function lineToRow(line: string, fallbackYear: number): ParsedRow | null {
+export function lineToRow(line: string, fallbackYear: number): ParsedRow | null {
   if (isNoise(line)) return null;
 
   const dateMatch = line.match(DATE_RE);
@@ -339,7 +437,7 @@ export async function parsePdf(file: File): Promise<ParseResult> {
     return {
       rows: [],
       skipped: 0,
-      detectedTotal: null,
+      reconciliation: null,
       source: "pdf",
       warning:
         "This PDF has no readable text — it's likely a scan or photo. Try downloading the CSV version from your banking app instead.",
@@ -352,13 +450,84 @@ export async function parsePdf(file: File): Promise<ParseResult> {
 
   const rows: ParsedRow[] = [];
   let skipped = 0;
-  for (const line of allLines) {
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i];
     const row = lineToRow(line, fallbackYear);
-    if (row) rows.push(row);
-    else if (DATE_RE.test(line) && AMOUNT_RE.test(line) && !isNoise(line)) skipped++;
+    if (row) {
+      rows.push({ ...row, description: enrichDescription(row.description, allLines, i) });
+    } else if (looksLikeMissedTransaction(line, fallbackYear)) {
+      skipped++;
+    }
   }
 
-  return { rows, skipped, detectedTotal: null, source: "pdf" };
+  return {
+    rows,
+    skipped,
+    reconciliation: detectReconciliation(allLines, rows),
+    source: "pdf",
+  };
+}
+
+/** Mostly terminal IDs, card masks and timestamps — no merchant in there. */
+function isWeakDescription(description: string): boolean {
+  const letters = description.replace(/[^A-Za-z]/g, "");
+  if (letters.length >= 6) return false;
+  return true;
+}
+
+/**
+ * Recover a merchant name printed on its own line.
+ *
+ * Standard Bank splits some rows across two lines: the amount line carries
+ * only a terminal ID and timestamp, with the transaction type on the line
+ * below ("AUTOBANK CASH WITHDRAWAL AT"). Those rows otherwise arrive with
+ * descriptions like "0000H422 2026-05-22T10:09:46 5196*9531", which no
+ * categoriser can do anything with.
+ *
+ * Only applied when the row's own description carries almost no letters, so
+ * rows that already name their merchant are left untouched.
+ */
+export function enrichDescription(description: string, lines: string[], index: number): string {
+  if (!isWeakDescription(description)) return description;
+
+  const next = lines[index + 1];
+  if (!next) return description;
+
+  // Must be a text-only line: no date, no money, or it's another transaction.
+  if (DATE_RE.test(next)) return description;
+  if (new RegExp(AMOUNT_RE.source, "i").test(next)) return description;
+
+  const letters = next.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 4) return description;
+
+  return `${next.trim()} ${description}`.trim();
+}
+
+/**
+ * Would a human call this a transaction we failed to read?
+ *
+ * The warning this feeds tells someone their statement may be incomplete, so
+ * it has to be quiet unless something was genuinely lost. Requiring a real
+ * date, a real amount and description text between them keeps page headers
+ * and summary lines from raising a false alarm.
+ *
+ * Note the fresh RegExp: AMOUNT_RE carries the /g flag, and `.test()` on a
+ * global regex advances lastIndex between calls, so reusing it here would
+ * make results alternate.
+ */
+export function looksLikeMissedTransaction(line: string, fallbackYear: number): boolean {
+  if (isNoise(line)) return false;
+
+  const dateMatch = line.match(DATE_RE);
+  if (!dateMatch || !parseDate(dateMatch[1], fallbackYear)) return false;
+
+  const amounts = line.match(new RegExp(AMOUNT_RE.source, "gi"));
+  if (!amounts || amounts.every((a) => parseAmount(a) === null)) return false;
+
+  // Something between the date and the money that reads like a payee.
+  const descStart = (dateMatch.index ?? 0) + dateMatch[1].length;
+  const rest = line.slice(descStart).replace(new RegExp(AMOUNT_RE.source, "gi"), " ");
+  return /[A-Za-z]{3,}/.test(rest);
 }
 
 export async function parseStatement(file: File): Promise<ParseResult> {

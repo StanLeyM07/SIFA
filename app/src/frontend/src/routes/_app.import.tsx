@@ -40,6 +40,8 @@ function ImportPage() {
   const [rows, setRows] = useState<CategorizedRow[]>([]);
   const [originals, setOriginals] = useState<CategorizedRow[]>([]);
   const [skipped, setSkipped] = useState(0);
+  const [reconciliation, setReconciliation] =
+    useState<Awaited<ReturnType<typeof parseStatement>>["reconciliation"]>(null);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [skipDuplicates, setSkipDuplicates] = useState(true);
@@ -91,6 +93,7 @@ function ImportPage() {
         setRows(sorted);
         setOriginals(sorted);
         setSkipped(result.skipped);
+        setReconciliation(result.reconciliation);
         setStage("review");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Couldn't read that file.");
@@ -209,6 +212,44 @@ function ImportPage() {
             <p className="mt-1 font-mono text-xl tabular-nums">{totals.needsReview}</p>
           </div>
         </section>
+
+        {/* Checked against the bank's own balances — the strongest signal
+            that nothing was missed or double-counted. */}
+        {reconciliation && (
+          <div
+            className={`flex items-start gap-2 rounded-xl p-4 text-sm ${
+              reconciliation.matches
+                ? "bg-emerald/10 text-emerald"
+                : "bg-gold/10 text-gold"
+            }`}
+          >
+            {reconciliation.matches ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <p>
+              {reconciliation.matches ? (
+                <>
+                  <strong>Checks out against your statement.</strong> Opening{" "}
+                  {formatZAR(reconciliation.opening)} plus these transactions lands
+                  exactly on your closing balance of{" "}
+                  {formatZAR(reconciliation.closing)}.
+                </>
+              ) : (
+                <>
+                  <strong>
+                    {formatZAR(Math.abs(reconciliation.difference))} doesn't add up.
+                  </strong>{" "}
+                  Opening {formatZAR(reconciliation.opening)} plus these transactions
+                  gives {formatZAR(reconciliation.opening + reconciliation.net)}, but
+                  your statement closes at {formatZAR(reconciliation.closing)}. Some
+                  rows may be missing or duplicated — worth a look before importing.
+                </>
+              )}
+            </p>
+          </div>
+        )}
 
         {(skipped > 0 || warning) && (
           <div className="flex items-start gap-2 rounded-xl bg-gold/10 p-4 text-sm text-gold">

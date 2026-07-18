@@ -1,4 +1,11 @@
-import { parseCsv, parseDate, parseAmount } from "./parse-statement";
+import {
+  parseCsv,
+  parseDate,
+  parseAmount,
+  lineToRow,
+  detectReconciliation,
+  looksLikeMissedTransaction,
+} from "./parse-statement";
 
 let fails = 0;
 function eq(label: string, got: unknown, want: unknown) {
@@ -62,5 +69,60 @@ const noisy = `Date,Description,Amount
 Statement Period,01 Mar - 31 Mar,`;
 const d = parseCsv(noisy);
 eq("only the real txn", d.rows.length, 1);
+
+console.log("\n── PDF lines: reference numbers must not become amounts ──");
+// Real Standard Bank line. The reference ends in 531 and the amount is 600.00,
+// so treating space as a thousands separator read it as R531 600.
+const sbsa = lineToRow("17 Jun 26 HATFIELD P4 16H58 338279531 600.00 588.66", 2026);
+eq("amount is 600, not 531600", sbsa?.amount, 600);
+eq("date read", sbsa?.date, "2026-06-17");
+eq("description excludes the reference", /HATFIELD/.test(sbsa?.description ?? ""), true);
+
+const sbsa2 = lineToRow("17 Jun 26 HATFIELD P4 16H59 338279531 390.00 967.86", 2026);
+eq("second line amount is 390", sbsa2?.amount, 390);
+
+// A genuine thousands-separated amount must still parse.
+const big = lineToRow("05 May 26 SALARY DEPOSIT 25 400.00 26 000.00", 2026);
+eq("real thousands amount survives", big?.amount, 25400);
+
+console.log("\n── page furniture must not raise a false warning ──");
+for (const junk of [
+  "From: 17 Apr 26",
+  "To: 16 Jul 26",
+  "16 Jul 2026",
+  "3 month statement",
+  "Transaction details Available Balance: R16.14",
+  "STATEMENT OPENING BALANCE 104.81",
+]) {
+  const flagged = looksLikeMissedTransaction(junk, 2026);
+  if (flagged) fails++;
+  console.log(`${!flagged ? "PASS" : "FAIL"}  ignored: "${junk.slice(0, 46)}"`);
+}
+// A real transaction line we failed to read SHOULD still warn.
+eq(
+  "genuine unreadable row still warns",
+  looksLikeMissedTransaction("22 Apr 26 SHELL VARSITY GARAGE 37.5O 104.81", 2026),
+  true,
+);
+
+console.log("\n── reconciliation against the bank's own balances ──");
+const recLines = [
+  "STATEMENT OPENING BALANCE 104.81",
+  "Available Balance: R16.14",
+];
+const good = detectReconciliation(recLines, [
+  { date: "2026-04-22", description: "A", amount: -37.5 },
+  { date: "2026-04-25", description: "B", amount: -51.17 },
+]);
+eq("matches when the maths lands", good?.matches, true);
+eq("net computed", good?.net, -88.67);
+
+const bad = detectReconciliation(recLines, [
+  { date: "2026-04-22", description: "A", amount: -37.5 },
+]);
+eq("flags a mismatch", bad?.matches, false);
+eq("reports the gap", bad?.difference, 51.17);
+
+eq("silent when balances absent", detectReconciliation(["nothing here"], []), null);
 
 console.log(`\n${fails === 0 ? "ALL PASS" : fails + " FAILURES"}`);

@@ -34,11 +34,18 @@ export const CATEGORIES = [
   "Transport",
   "Rent",
   "Utilities",
+  "Airtime & data",
   "Subscriptions",
   "Eating out",
   "Entertainment",
   "Health",
   "Shopping",
+  // Bank charges are a real, controllable expense — on a real SA statement
+  // they were a third of all rows. Folding them into "Other" hid both the
+  // spend and the fact that it's worth doing something about.
+  "Bank fees",
+  "Cash",
+  "Transfers",
   "Salary",
   "Freelance",
   "Other",

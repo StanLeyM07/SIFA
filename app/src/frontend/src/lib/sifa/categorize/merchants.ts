@@ -149,6 +149,36 @@ export const MERCHANT_RULES: MerchantRule[] = [
   // ── Income ────────────────────────────────────────────────
   { merchant: "Salary", aliases: ["SALARY", "SALARIES", "PAYROLL", "WAGES", "SLRY"], category: "Salary" },
   { merchant: "Freelance", aliases: ["FREELANCE", "CONSULTING", "INVOICE PAYMENT", "CONTRACT WORK"], category: "Freelance" },
+
+  // ── Bank charges ──────────────────────────────────────────
+  // A third of the rows on a real Standard Bank statement. Every one of these
+  // used to land in "Other" and get flagged for review, which buried the
+  // genuinely unknown merchants in noise.
+  { merchant: "Bank fee", aliases: ["FEE", "FEES", "SERVICE FEE", "MONTHLY MANAGEMENT FEE", "MANAGEMENT FEE", "ADMIN FEE", "TRANSACTION FEE", "DECLINE FEE", "UNPAID FEE", "PENALTY FEE", "CARD FEE"], category: "Bank fees" },
+  { merchant: "Interest charged", aliases: ["EXCESS INTEREST", "INTEREST CHARGED", "DEBIT INTEREST", "OVERDRAFT INTEREST"], category: "Bank fees" },
+  { merchant: "Bank", aliases: ["STANDARD BANK", "STANDARDBANK", "STANDARDB", "ABSA BANK", "NEDBANK", "FNB", "CAPITEC BANK"], category: "Bank fees" },
+
+  // ── Airtime & data ────────────────────────────────────────
+  // "VAS" is the value-added-services prefix SA banks use for airtime/data.
+  { merchant: "Airtime / data", aliases: ["VAS VODA", "VAS MTN", "VAS CELLC", "VAS TELKOM", "PREPAID AIRTIME", "AIRTIME", "PREPAID MOBILE", "DATA BUNDLE", "PREPAID DATA", "DATA"], category: "Airtime & data" },
+
+  // ── Cash ──────────────────────────────────────────────────
+  { merchant: "Cash withdrawal", aliases: ["AUTOBANK CASH WITHDRAWAL", "CASH WITHDRAWAL", "ATM WITHDRAWAL", "CASH DEPOSIT", "AUTOBANK"], category: "Cash" },
+
+  // ── Transfers ─────────────────────────────────────────────
+  // Money moving between accounts or people — real, but not "spending".
+  { merchant: "Transfer", aliases: ["IB TRANSFER", "IB PAYMENT", "CAPITEC", "CREDIT TRANSFER", "IMMEDIATE TRANSFER", "INTERNAL TRANSFER", "PAYSHAP", "PAYSHAP PAYMENT", "INSTANT MONEY", "EWALLET", "E WALLET"], category: "Transfers" },
+
+  // ── Local merchants seen on real SA statements ────────────
+  { merchant: "Yoco (card machine)", aliases: ["YOCO"], category: "Shopping" },
+  { merchant: "SnapScan", aliases: ["SNAPSCAN"], category: "Shopping" },
+  { merchant: "Zapper", aliases: ["ZAPPER"], category: "Shopping" },
+  { merchant: "Markham", aliases: ["MARKHAM"], category: "Shopping" },
+  { merchant: "Exact", aliases: ["EXACT"], category: "Shopping" },
+  { merchant: "Identity", aliases: ["IDENTITY"], category: "Shopping" },
+  { merchant: "Butchery", aliases: ["BUTCHERY", "CHOICE BUTCHERY", "BUTCHER"], category: "Groceries" },
+  { merchant: "Chickenhub", aliases: ["CHICKENHUB"], category: "Eating out" },
+  { merchant: "OpenAI", aliases: ["OPENAI"], category: "Subscriptions" },
 ];
 
 /** Alias index, pre-tokenised and sorted longest-first so specific beats generic. */

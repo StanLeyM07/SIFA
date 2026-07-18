@@ -12,3 +12,8 @@ dist/
 .playwright-mcp/
 *.png
 !app/src/frontend/public/*.png
+
+# Real bank statements — never commit financial documents.
+*.pdf
+*.csv
+!app/src/frontend/src/**/*.csv

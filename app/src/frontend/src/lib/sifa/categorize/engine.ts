@@ -55,11 +55,38 @@ export function applyCorrection(
   return { ...corrections, [key]: category };
 }
 
-/** Look up a merchant by normalised token run. Longest alias wins. */
+/**
+ * Look up a merchant by normalised token run. Longest alias wins.
+ *
+ * Falls back to prefix matching on the final token because statements clip
+ * descriptions to a fixed width — a real one rendered "CHICKEN LICKEN" as
+ * "CHICKEN LICKE", which an exact match misses entirely. Only applied to
+ * reasonably long fragments, so short tokens can't match half the dictionary.
+ */
 function matchMerchant(tokens: string[]) {
   for (const entry of ALIAS_INDEX) {
     if (containsTokenRun(tokens, entry.tokens)) return entry;
   }
+
+  for (const entry of ALIAS_INDEX) {
+    const last = entry.tokens[entry.tokens.length - 1];
+    if (last.length < 5) continue;
+
+    const head = entry.tokens.slice(0, -1);
+    for (let i = 0; i <= tokens.length - entry.tokens.length; i++) {
+      const headMatches =
+        head.length === 0 ||
+        head.every((t, j) => tokens[i + j] === t);
+      if (!headMatches) continue;
+
+      const candidate = tokens[i + head.length];
+      // Truncated, not merely similar: at least 4 chars and a real prefix.
+      if (candidate && candidate.length >= 4 && last.startsWith(candidate)) {
+        return entry;
+      }
+    }
+  }
+
   return null;
 }
 
@@ -94,6 +121,21 @@ export function categorizeOne(
       type: inferType(amount, normalized, corrected),
       confidence: CONFIDENCE.correction,
       source: "correction",
+      normalized,
+    };
+  }
+
+  // A line that opens with "FEE" is the bank's charge for a transaction, not
+  // the transaction. "FEE: PREPAID MOBILE PURCHASE" is a R1 charge alongside
+  // the airtime — matching it on "PREPAID MOBILE" would file the fee as
+  // airtime and double-count the spend.
+  if (tokens[0] === "FEE" || tokens[0] === "FEES") {
+    return {
+      category: "Bank fees",
+      type: "expense",
+      confidence: CONFIDENCE.merchant,
+      source: "merchant",
+      merchant: "Bank fee",
       normalized,
     };
   }

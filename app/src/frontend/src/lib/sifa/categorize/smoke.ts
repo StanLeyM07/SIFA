@@ -14,7 +14,19 @@ const cases: Array<[string, number, string]> = [
   ["TAKEALOT COM ONLINE", -1899.0, "Shopping"],
   ["SALARY ACB CREDIT OCT", 25000.0, "Salary"],
   ["INTERNET BANKING PAYMENT TO J SMITH", -500.0, "Other"],
-  ["MONTHLY ACCOUNT SERVICE FEE", -105.0, "Other"],
+  // Bank charges were a third of the rows on a real SA statement, so they get
+  // their own category rather than disappearing into "Other".
+  ["MONTHLY ACCOUNT SERVICE FEE", -105.0, "Bank fees"],
+  ["FEE: PREPAID MOBILE PURCHASE", -1.0, "Bank fees"],
+  ["EXCESS INTEREST", -0.09, "Bank fees"],
+  ["VAS VODA AIRTIME", -29.0, "Airtime & data"],
+  ["AUTOBANK CASH WITHDRAWAL AT", -500.0, "Cash"],
+  // As it actually prints on a Standard Bank statement. ("IB TRANSFER TO X"
+  // is stripped as a channel prefix by design, leaving the destination — that
+  // is correct for merchant matching, so it isn't tested as a transfer here.)
+  ["IB TRANSFER 6014432", -1000.0, "Transfers"],
+  // Statements clip descriptions; "CHICKEN LICKEN" arrives truncated.
+  ["CHICKEN LICKE 5196*9531", -55.0, "Eating out"],
 ];
 
 let pass = 0;
