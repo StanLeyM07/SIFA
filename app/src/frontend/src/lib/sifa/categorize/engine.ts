@@ -28,6 +28,37 @@ const CONFIDENCE: Record<MatchSource, number> = {
   none: 0,
 };
 
+/**
+ * Money moving between the account holder's own accounts.
+ *
+ * Standard Bank marks these "IB TRANSFER TO" / "IB TRANSFER FROM" (IB being
+ * internet banking). The TRANSFER/PAYMENT split is the load-bearing part:
+ *
+ *   IB TRANSFER TO   -> your own other account   (movement, not spending)
+ *   IB PAYMENT TO    -> someone else             (a real expense)
+ *
+ * So "PAYMENT" is deliberately excluded below — treating it as movement
+ * would erase genuine spending from every total.
+ *
+ * Only the Standard Bank wording is confirmed against a real statement. The
+ * other patterns are best-effort for FNB/Capitec/Absa/Nedbank; when one is
+ * wrong the user recategorises it once and the correction is remembered.
+ */
+const INTERNAL_TRANSFER_RE = new RegExp(
+  [
+    // Standard Bank — verified
+    String.raw`\bIB\s+TRANSFER\b`,
+    // Common across banks
+    String.raw`\bINTERNAL\s+TR(AN)?SF?E?R\b`,
+    String.raw`\bTRANSFER\s+(TO|FROM)\s+(MY|OWN|SAVINGS|CHEQUE|CURRENT)\b`,
+    String.raw`\bINTER[\s-]?ACCOUNT\b`,
+    // FNB / Capitec shorthand
+    String.raw`\bINT\s?TRF\b`,
+    String.raw`\bTRF\s+(TO|FROM)\b`,
+  ].join("|"),
+  "i",
+);
+
 /** Categories that only ever make sense as income. */
 const INCOME_CATEGORIES = new Set<Category>(["Salary", "Freelance"]);
 
@@ -121,6 +152,22 @@ export function categorizeOne(
       type: inferType(amount, normalized, corrected),
       confidence: CONFIDENCE.correction,
       source: "correction",
+      normalized,
+    };
+  }
+
+  // Transfers are detected on the raw description, before normalisation.
+  // "IB TRANSFER TO" is stripped as a channel prefix (correctly — it lets
+  // "IB PAYMENT TO WOOLWORTHS" match Woolworths), which erased the very
+  // signal that marks an inter-account move. On a real statement that made
+  // outgoing transfers count as spending while incoming ones were excluded.
+  if (INTERNAL_TRANSFER_RE.test(description)) {
+    return {
+      category: "Transfers",
+      type: amount < 0 ? "expense" : "income",
+      confidence: CONFIDENCE.merchant,
+      source: "merchant",
+      merchant: "Transfer between accounts",
       normalized,
     };
   }

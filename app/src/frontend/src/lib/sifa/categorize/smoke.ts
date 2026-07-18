@@ -30,6 +30,10 @@ const cases: Array<[string, number, string]> = [
 ];
 
 let pass = 0;
+/** Declared explicitly: an undeclared `fails++` throws under ES module strict
+ *  mode, so a genuine regression would have crashed the run instead of being
+ *  reported as a failure. */
+let fails = 0;
 console.log("desc -> normalized | category (source, conf)\n");
 for (const [desc, amt, expected] of cases) {
   const m = categorizeOne(desc, amt);
@@ -40,6 +44,38 @@ for (const [desc, amt, expected] of cases) {
   );
 }
 console.log(`\n${pass}/${cases.length} matched expectation`);
+
+// ── Inter-account transfers ──────────────────────────────────
+// Standard Bank marks these IB TRANSFER TO / FROM. Both directions must be
+// caught: on a real statement the outgoing one was normalised down to "H"
+// (because "IB TRANSFER TO" is stripped as a channel prefix) and counted as
+// R2 000 of spending, while the incoming ones were correctly excluded.
+console.log("\n── inter-account transfers (both directions) ──");
+for (const [desc, amt] of [
+  ["IB Transfer to *****2769223 09H20 *****9531", -2000],
+  ["IB TRANSFER FROM *****2769223 10H38 *****9531", 1000],
+  ["INTERNAL TRANSFER TO SAVINGS", -500],
+  ["TRF TO 620183", -300],
+] as Array<[string, number]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category === "Transfers";
+  if (!ok) fails++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 44)} -> ${m.category}`);
+}
+
+// The load-bearing distinction: a PAYMENT is money leaving for someone else,
+// so it must stay real spending. Treating it as movement would erase genuine
+// expenses from every total.
+console.log("\n── payments to third parties stay spending ──");
+for (const [desc, amt] of [
+  ["IB PAYMENT TO WOOLWORTHS", -450],
+  ["IB PAYMENT TO J SMITH RENT", -6500],
+] as Array<[string, number]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category !== "Transfers";
+  if (!ok) fails++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 44)} -> ${m.category}`);
+}
 
 // Type inference on income
 const sal = categorizeOne("SALARY ACB CREDIT OCT", 25000);
@@ -55,3 +91,7 @@ console.log(`after correction (different line, same shop): ${after.category} (${
 // Coverage over the batch
 const summary = categorizeAll(cases.map(([description, amount]) => ({ date: "2024-01-01", description, amount })));
 console.log(`\ncoverage: ${(summary.coverage * 100).toFixed(0)}%  needsReview: ${summary.needsReview}`);
+
+console.log(`
+${fails === 0 && pass === cases.length ? "ALL PASS" : fails + " FAILURES"}`);
+process.exit(fails === 0 ? 0 : 1);
