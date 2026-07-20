@@ -18,6 +18,11 @@ import {
 } from "@/lib/sifa/import/parse-statement";
 import { categorizeAll, type CategorizedRow } from "@/lib/sifa/categorize/engine";
 import { recordCorrections } from "@/lib/sifa/services/categorize.service";
+import {
+  duplicateKey,
+  selectRowsToImport,
+  countDuplicates,
+} from "@/lib/sifa/import/import-selection";
 import { storage } from "@/lib/sifa/storage";
 import { CATEGORIES } from "@/lib/sifa/types";
 import { toast } from "sonner";
@@ -27,13 +32,6 @@ export const Route = createFileRoute("/_app/import")({
 });
 
 type Stage = "idle" | "reading" | "review" | "done";
-
-/** A row already in the ledger with the same date, amount and description is
- *  almost certainly a re-import — but two identical coffees on one day are
- *  real, so this flags rather than blocks. */
-function duplicateKey(r: { date: string; description: string; amount: number }) {
-  return `${r.date}|${Math.round(r.amount * 100)}|${r.description.trim().toUpperCase()}`;
-}
 
 function ImportPage() {
   const { addTransactions, transactions } = useSifa();
@@ -53,6 +51,10 @@ function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [skipDuplicates, setSkipDuplicates] = useState(true);
+  // Captured at confirm time. The done screen can't recompute this: by the time
+  // it renders, the ledger already holds the rows just imported, so every one
+  // would count as a duplicate and a real import would announce "0 in".
+  const [importedCount, setImportedCount] = useState(0);
 
   const existingKeys = useMemo(
     () => new Set(transactions.map(duplicateKey)),
@@ -60,7 +62,7 @@ function ImportPage() {
   );
 
   const duplicateCount = useMemo(
-    () => rows.filter((r) => existingKeys.has(duplicateKey(r))).length,
+    () => countDuplicates(rows, existingKeys),
     [rows, existingKeys],
   );
 
@@ -84,6 +86,15 @@ function ImportPage() {
       setError(null);
       setWarning(null);
       setFileName(file.name);
+
+      if (file.size === 0) {
+        setError(
+          "That file is empty — it has no content to read. Re-download the statement from your banking app and try again.",
+        );
+        setStage("idle");
+        return;
+      }
+
       setStage("reading");
 
       try {
@@ -113,7 +124,16 @@ function ImportPage() {
         setLinkedAccounts(detectLinkedAccounts(result.rows));
         setStage("review");
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Couldn't read that file.");
+        // parseStatement throws a friendly message for the unsupported-type
+        // case; anything else here is a low-level parser/PDF failure whose raw
+        // text ("Invalid PDF structure", "XRef parse") means nothing to a
+        // non-technical user, so it's replaced with something actionable.
+        const raw = err instanceof Error ? err.message : "";
+        const friendly =
+          /reads PDF and CSV/i.test(raw)
+            ? raw
+            : "Sifa couldn't read that file — it may be damaged, password-protected, or not a real statement. Try re-downloading it, or use the CSV version from your banking app.";
+        setError(friendly);
         setStage("idle");
       }
     },
@@ -125,9 +145,7 @@ function ImportPage() {
   };
 
   function confirmImport() {
-    const toImport = skipDuplicates
-      ? rows.filter((r) => !existingKeys.has(duplicateKey(r)))
-      : rows;
+    const toImport = selectRowsToImport(rows, existingKeys, skipDuplicates);
 
     recordCorrections(rows, originals);
     addTransactions(
@@ -140,6 +158,7 @@ function ImportPage() {
       })),
     );
     storage.setOnboarded(true);
+    setImportedCount(toImport.length);
     setStage("done");
     toast(`${toImport.length} transactions imported.`);
   }
@@ -162,13 +181,20 @@ function ImportPage() {
     setError(null);
     setWarning(null);
     setSkipped(0);
+    // Without these, a second statement inherits the first one's review state:
+    // the "skip duplicates" toggle stayed unchecked across re-uploads (turning
+    // off double-import protection the user never re-consented to), and stale
+    // linked-account / reconciliation banners could flash before the new parse
+    // overwrote them.
+    setLinkedAccounts([]);
+    setReconciliation(null);
+    setSkipDuplicates(true);
+    setImportedCount(0);
   }
 
   // ── Done ───────────────────────────────────────────────────
   if (stage === "done") {
-    const imported = skipDuplicates
-      ? rows.filter((r) => !existingKeys.has(duplicateKey(r))).length
-      : rows.length;
+    const imported = importedCount;
     return (
       <div className="mx-auto max-w-lg py-12 text-center">
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald/10">

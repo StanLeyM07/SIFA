@@ -52,6 +52,7 @@ Dependency-free smoke suites, runnable with `tsx`:
 ```bash
 cd app/src/frontend/src/lib/sifa
 npx tsx import/parse.smoke.ts        # date/amount/CSV parsing
+npx tsx import/import-selection.smoke.ts  # duplicate detection + import-count correctness
 npx tsx categorize/smoke.ts          # merchant matching + correction learning
 npx tsx coach/facts.smoke.ts         # metric correctness + privacy assertions
 npx tsx insights.smoke.ts            # deterministic insight rules
