@@ -156,7 +156,15 @@ export const MERCHANT_RULES: MerchantRule[] = [
   // genuinely unknown merchants in noise.
   { merchant: "Bank fee", aliases: ["FEE", "FEES", "SERVICE FEE", "MONTHLY MANAGEMENT FEE", "MANAGEMENT FEE", "ADMIN FEE", "TRANSACTION FEE", "DECLINE FEE", "UNPAID FEE", "PENALTY FEE", "CARD FEE"], category: "Bank fees" },
   { merchant: "Interest charged", aliases: ["EXCESS INTEREST", "INTEREST CHARGED", "DEBIT INTEREST", "OVERDRAFT INTEREST"], category: "Bank fees" },
-  { merchant: "Bank", aliases: ["STANDARD BANK", "STANDARDBANK", "STANDARDB", "ABSA BANK", "NEDBANK", "FNB", "CAPITEC BANK"], category: "Bank fees" },
+  // A "Bank" alias entry mapping raw bank names (STANDARD BANK, FNB, etc.) to
+  // Bank fees used to live here — the same blind spot as the CAPITEC rule
+  // above: a bank's name says nothing about whether the line is a fee or a
+  // payment that merely names a bank as the recipient. On a real statement it
+  // matched "PAYSHAP PAY BY PROXY STANDARDB" — a R125 PayShap payment to
+  // someone — before the "Instant payment" rule below ever got a chance,
+  // filing a real third-party payment as a bank fee. Genuine fee lines
+  // already say "FEE" ("MONTHLY MANAGEMENT FEE", "CASH WITHDRAWAL FEE") and
+  // are caught by the rule above; a bare bank name adds nothing but risk.
 
   // ── Airtime & data ────────────────────────────────────────
   // "VAS" is the value-added-services prefix SA banks use for airtime/data.
@@ -189,13 +197,27 @@ export const MERCHANT_RULES: MerchantRule[] = [
   // Transfers hid both sides of real money changing hands.
   { merchant: "Instant payment", aliases: ["PAYSHAP", "PAYSHAP PAYMENT", "INSTANT MONEY", "EWALLET", "E WALLET"], category: "Other" },
 
-  // ── Local merchants seen on real SA statements ────────────
-  { merchant: "Yoco (card machine)", aliases: ["YOCO"], category: "Shopping" },
-  { merchant: "SnapScan", aliases: ["SNAPSCAN"], category: "Shopping" },
-  { merchant: "Zapper", aliases: ["ZAPPER"], category: "Shopping" },
+  // ── Generic card-payment rails ────────────────────────────
+  // Yoco / SnapScan / Zapper are payment processors, not merchants: the line
+  // shows the rail, and the actual shop is hidden or truncated ("YOCO *SHOPP").
+  // Filing them as Shopping is a guess that lands a food-stall or airtime buy
+  // under the wrong category. They are recognised (so the UI can label the
+  // rail) but deliberately left "Other" rather than a wrong specific guess.
+  { merchant: "Yoco (card payment)", aliases: ["YOCO"], category: "Other" },
+  { merchant: "SnapScan (card payment)", aliases: ["SNAPSCAN"], category: "Other" },
+  { merchant: "Zapper (card payment)", aliases: ["ZAPPER"], category: "Other" },
+
+  // ── Clothing / fashion retailers (TFG, Pepkor, others) ────
   { merchant: "Markham", aliases: ["MARKHAM"], category: "Shopping" },
   { merchant: "Exact", aliases: ["EXACT"], category: "Shopping" },
-  { merchant: "Identity", aliases: ["IDENTITY"], category: "Shopping" },
+  // Bash is TFG's online fashion store. It also resolves to Shopping via the
+  // "TFG ACC" token on the line, but a named rule gives the UI the real brand.
+  { merchant: "Bash", aliases: ["BASH"], category: "Shopping" },
+  // "C*IDENTITY" was mapped to Shopping on the assumption it is the Identity
+  // clothing chain, but on the real statement it reads as an identity/verify
+  // service — genuinely unidentifiable. Guessing Shopping was wrong more often
+  // than right, so it is left to fall through to "Other" and be flagged for
+  // review (the user corrects it once and it is remembered).
   { merchant: "Butchery", aliases: ["BUTCHERY", "CHOICE BUTCHERY", "BUTCHER"], category: "Groceries" },
   { merchant: "Chickenhub", aliases: ["CHICKENHUB"], category: "Eating out" },
   { merchant: "OpenAI", aliases: ["OPENAI"], category: "Subscriptions" },

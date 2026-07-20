@@ -172,11 +172,18 @@ export function categorizeOne(
     };
   }
 
-  // A line that opens with "FEE" is the bank's charge for a transaction, not
-  // the transaction. "FEE: PREPAID MOBILE PURCHASE" is a R1 charge alongside
-  // the airtime — matching it on "PREPAID MOBILE" would file the fee as
-  // airtime and double-count the spend.
-  if (tokens[0] === "FEE" || tokens[0] === "FEES") {
+  // A standalone "FEE"/"FEES" token means the bank's charge for a transaction,
+  // not the transaction. "FEE: PREPAID MOBILE PURCHASE" is a R1 charge
+  // alongside the airtime — matching it on "PREPAID MOBILE" would file the fee
+  // as airtime and double-count the spend.
+  //
+  // The token is not always first. Standard Bank prints the charge type ahead
+  // of the word: "CASH DEPOSIT FEE - AUTOBANK", "CASH WITHDRAWAL FEE",
+  // "MONTHLY MANAGEMENT FEE". Checking only tokens[0] let "CASH DEPOSIT FEE"
+  // fall through to the "CASH DEPOSIT" deposit rule and be booked as money IN —
+  // a fee counted as income. So scan the whole line for the token. It is a
+  // real word ("COFFEE" tokenises to COFFEE, not FEE), so this stays precise.
+  if (tokens.includes("FEE") || tokens.includes("FEES")) {
     return {
       category: "Bank fees",
       type: "expense",

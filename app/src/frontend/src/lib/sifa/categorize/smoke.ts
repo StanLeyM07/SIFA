@@ -45,6 +45,108 @@ for (const [desc, amt, expected] of cases) {
 }
 console.log(`\n${pass}/${cases.length} matched expectation`);
 
+// ── Real Standard Bank lines (verbatim, 3-month statement) ───
+// These are the raw post-enrichment descriptions off an actual statement —
+// truncated names, card fragments (5196*9531), embedded dates and the two
+// different garage prefixes ("ENGEN DUNCUN" vs "C*ENGEN HATFI"). They exercise
+// the FULL pipeline (normalise -> tokenize -> matchMerchant), not the isolated
+// merchant unit test, which is where earlier "correct in theory" rules slipped.
+console.log("\n── real Standard Bank statement lines ──");
+for (const [desc, amt, expected] of [
+  // Garages: same merchant, two prefix styles the statement actually prints.
+  ["SHELL VARSITY 5196*9531 20 APR", -37.5, "Transport"],
+  ["ENGEN DUNCUN 5196*9531 18 JUN", -22.3, "Transport"],
+  ["C*ENGEN HATFI 5196*9531 06 JUL", -27.9, "Transport"],
+  ["DL UBER 5196*9531 21 JUN", -21.0, "Transport"],
+  // Fast food, mostly truncated by the statement's fixed width.
+  ["KFC MABILO HA 5196*9531 19 JUN", -30.0, "Eating out"],
+  ["KFC KRANSKOP 5196*9531 05 JUL", -30.0, "Eating out"],
+  ["CHICKENHUB 5196*9531 25 APR", -24.0, "Eating out"],
+  ["CHICKEN LICKE 5196*9531 23 JUN", -60.0, "Eating out"], // truncated, via prefix match through the real pipeline
+  ["STEERS ENG PRETORIA ZAF 06-07-2026 20H37:14", -8.5, "Eating out"], // POS-abroad format, trailing timestamp
+  // Groceries. PNP CRP is high-frequency on this statement — lock it down.
+  ["PNP CRP HATFI 5196*9531 26 APR", -15.99, "Groceries"],
+  ["SHOPRITE VEND 5196*9531 03 JUL", -460.86, "Groceries"],
+  ["CHOICE BUTCHE 5196*9531 03 JUL", -656.69, "Groceries"], // "Choice Butche[ry]" truncated
+  // Clothing / fashion retailers.
+  ["PEP 8715 THOH 5196*9531 30 JUN", -69.97, "Shopping"],
+  ["EXACT THOHOYA 5196*9531 03 JUL", -601.77, "Shopping"],
+  ["MARKHAM THOHO 5196*9531 03 JUL", -800.0, "Shopping"],
+  ["BASH BASH TFG ACC 5196*9531", -160.0, "Shopping"],
+  // Subscriptions and airtime.
+  ["OPENAI SAN FRANCISCO USA 27-05-2026 17H48:33", -8.5, "Subscriptions"],
+  ["VAS0022 VODA0606730770", -5.0, "Airtime & data"], // Vodacom prepaid voucher: digits glued to letters, collapses to "VAS VODA"
+  // Cash movement.
+  ["AUTOBANK CASH WITHDRAWAL AT BRANCH", -500.0, "Cash"],
+] as Array<[string, number, string]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category === expected;
+  if (!ok) fails++;
+  console.log(
+    `${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 40).padEnd(40)} -> ${m.category}${ok ? "" : `  EXPECTED ${expected}`}`,
+  );
+}
+
+// ── Bank fees: the word "FEE" is not always the first token ──
+// Standard Bank prints the charge type ahead of "FEE": "CASH DEPOSIT FEE" was
+// filed as a *deposit* (money IN) because the "CASH DEPOSIT" rule matched
+// before the old tokens[0]==="FEE" guard could fire. A fee counted as income
+// is the worst kind of error here — it inflates what the month looked like it
+// earned. The guard now scans the whole line for a standalone FEE token.
+console.log("\n── bank fees with FEE mid-line ──");
+for (const [desc, amt] of [
+  ["CASH DEPOSIT FEE - AUTOBANK", -12.0], // regressed to Deposits before the fix
+  ["CASH WITHDRAWAL FEE", -10.0],
+  ["MONTHLY MANAGEMENT FEE", -105.0],
+  ["FEE-ELECTRONIC ACCOUNT PAYMENT", -3.5], // hyphen, not colon
+  ["FEE- POS DECLINED INSUFF FUNDS", -8.0],
+  ["FEE: PAYSHAP PAY BY PROXY", -1.5],
+  ["EXCESS INTEREST", -0.09], // no FEE token — carried by the merchant dictionary
+] as Array<[string, number]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category === "Bank fees";
+  if (!ok) fails++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 40).padEnd(40)} -> ${m.category}`);
+}
+
+// ── Honest "Other" beats a confident wrong guess ─────────────
+// Some lines name a payment RAIL, not a shop (Yoco/SnapScan/Zapper card
+// machines hide the real merchant), or are genuinely unidentifiable. Guessing
+// a specific category (Yoco -> Shopping) is wrong more often than right on a
+// statement where "the analysis is not always correct". These must land in
+// "Other" rather than a fabricated category. A recognised rail is confident
+// Other; a fully unknown line falls through to review (source "none").
+console.log("\n── unknown/opaque lines resolve to Other ──");
+for (const [desc, amt, wantSource] of [
+  ["YOCO *SHOPP 5196*9531 23 APR", -25.0, "merchant"], // recognised rail, but Other not Shopping
+  ["C*IDENTITY 03 5196*9531 03 JUL", -170.0, "none"], // unidentifiable -> flag for review
+  ["BLW ZONE G DSP PT THANKSGIVING", -250.0, "none"], // no readable merchant at all
+] as Array<[string, number, string]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category === "Other" && m.source === wantSource;
+  if (!ok) fails++;
+  console.log(
+    `${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 40).padEnd(40)} -> ${m.category}/${m.source}`,
+  );
+}
+
+// A bare bank name is not evidence of a fee — the same blind spot as the
+// CAPITEC-as-Transfers bug below, for a different rule. On a real statement
+// "PAYSHAP PAY BY PROXY STANDARDB" is a R125 payment to someone (StandardB is
+// the recipient, not "your bank charged you"), but a "Bank" alias entry
+// matched "STANDARDB" before the PayShap rule got a chance, filing a real
+// third-party payment as a bank fee.
+console.log("\n── a bank's name in a payment isn't a fee ──");
+for (const [desc, amt] of [
+  ["PAYSHAP PAY BY PROXY STANDARDB", -125.0],
+  ["PAYSHAP PAY BY PROXY STANDARDB", -100.0],
+] as Array<[string, number]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category !== "Bank fees";
+  if (!ok) fails++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 44)} -> ${m.category}${ok ? "" : "  EXPECTED not Bank fees"}`);
+}
+
 // ── Inter-account transfers ──────────────────────────────────
 // Standard Bank marks these IB TRANSFER TO / FROM. Both directions must be
 // caught: on a real statement the outgoing one was normalised down to "H"
