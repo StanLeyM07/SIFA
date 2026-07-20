@@ -62,6 +62,19 @@ export function parseDate(raw: string, fallbackYear?: number): string | null {
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
 
+  // 2024/03/01, 2024.03.01 — year first. Capitec and Nedbank CSV exports use
+  // this; a leading 4-digit group is unambiguous, so it's checked before the
+  // day-first pattern below rather than guessed at. Without this branch a
+  // year-first CSV fails to parse a single row and imports as 0 transactions.
+  const yearFirst = s.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+  if (yearFirst) {
+    const year = Number(yearFirst[1]);
+    const month = Number(yearFirst[2]);
+    const day = Number(yearFirst[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
   // 05/03/2024, 05-03-24, 05.03.2024 — day first
   const slash = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
   if (slash) {
@@ -299,11 +312,32 @@ export function parseCsv(text: string): ParseResult {
     return { rows: [], skipped: 0, reconciliation: null, source: "csv", warning: "The file was empty." };
   }
 
-  const headers = rows[0].map((h) => String(h ?? "").trim().toLowerCase());
-  const hasHeader =
-    findCol(headers, DATE_HEADERS) >= 0 ||
-    findCol(headers, AMOUNT_HEADERS) >= 0 ||
-    findCol(headers, DEBIT_HEADERS) >= 0;
+  // The real header row isn't always row 0. FNB (and others) export a few
+  // metadata lines first — "Account Number,...", "Statement Period,...",
+  // "Opening Balance,..." — before the actual "Date,Amount,Balance,..." row.
+  // Assuming row 0 is the header made those preamble rows the column map:
+  // dateCol/descCol/amountCol landed on whatever row 0 happened to be, and
+  // the real header row got parsed as a data row with the running BALANCE
+  // read as the transaction amount — worse than dropping rows, since it
+  // silently imports the wrong figure. Scan a bounded window instead.
+  const HEADER_SCAN_LIMIT = 10;
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(rows.length, HEADER_SCAN_LIMIT); i++) {
+    const candidate = rows[i].map((h) => String(h ?? "").trim().toLowerCase());
+    if (
+      findCol(candidate, DATE_HEADERS) >= 0 ||
+      findCol(candidate, AMOUNT_HEADERS) >= 0 ||
+      findCol(candidate, DEBIT_HEADERS) >= 0
+    ) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+
+  const hasHeader = headerRowIndex >= 0;
+  const headers = hasHeader
+    ? rows[headerRowIndex].map((h) => String(h ?? "").trim().toLowerCase())
+    : [];
 
   let dateCol = 0;
   let descCol = 1;
@@ -313,7 +347,11 @@ export function parseCsv(text: string): ParseResult {
 
   if (hasHeader) {
     dateCol = Math.max(0, findCol(headers, DATE_HEADERS));
-    descCol = Math.max(0, findCol(headers, DESC_HEADERS));
+    // Math.max(0, -1) would silently fall back to column 0 — the date column
+    // — if the description header isn't in DESC_HEADERS (e.g. "Particulars").
+    // Only override the positional default when a real match is found.
+    const foundDesc = findCol(headers, DESC_HEADERS);
+    descCol = foundDesc >= 0 ? foundDesc : 1;
     amountCol = findCol(headers, AMOUNT_HEADERS);
     debitCol = findCol(headers, DEBIT_HEADERS);
     creditCol = findCol(headers, CREDIT_HEADERS);
@@ -322,7 +360,7 @@ export function parseCsv(text: string): ParseResult {
   const out: ParsedRow[] = [];
   let skipped = 0;
 
-  for (let i = hasHeader ? 1 : 0; i < rows.length; i++) {
+  for (let i = hasHeader ? headerRowIndex + 1 : 0; i < rows.length; i++) {
     const cols = rows[i].map((c) => String(c ?? "").trim());
     if (cols.length < 2) continue;
     const joined = cols.join(" ");
@@ -555,11 +593,22 @@ export function detectLinkedAccounts(rows: ParsedRow[]): Array<{
     .map(([reference, v]) => ({ reference, ...v }));
 }
 
-/** Mostly terminal IDs, card masks and timestamps — no merchant in there. */
+/**
+ * Mostly terminal IDs, card masks and timestamps — no merchant in there.
+ *
+ * The signal is not letter count. "HATFIELD P4 16H58 338279531" spells a
+ * suburb, so it clears any letter threshold, yet it names an ATM, not a
+ * merchant — the real transaction type ("AUTOBANK CASH DEPOSIT") prints on the
+ * next line and used to be dropped, leaving a bare terminal code no
+ * categoriser can place. What separates a merchant line from a terminal blob
+ * is how many genuine words it carries: a real payee reads as two or more
+ * alphabetic words ("SHELL VARSITY", "SHOPRITE VEND"), while a terminal blob is
+ * one incidental place name — or a truncated beneficiary like "STANDARDB" —
+ * wrapped in codes, timestamps and reference numbers that are not words at all.
+ */
 function isWeakDescription(description: string): boolean {
-  const letters = description.replace(/[^A-Za-z]/g, "");
-  if (letters.length >= 6) return false;
-  return true;
+  const words = description.split(/\s+/).filter((t) => /^[A-Za-z]{3,}$/.test(t));
+  return words.length < 2;
 }
 
 /**
@@ -571,8 +620,9 @@ function isWeakDescription(description: string): boolean {
  * descriptions like "0000H422 2026-05-22T10:09:46 5196*9531", which no
  * categoriser can do anything with.
  *
- * Only applied when the row's own description carries almost no letters, so
- * rows that already name their merchant are left untouched.
+ * Only applied when the row's own description reads as a terminal blob rather
+ * than a merchant (see isWeakDescription), so rows that already name their
+ * merchant are left untouched.
  */
 export function enrichDescription(description: string, lines: string[], index: number): string {
   if (!isWeakDescription(description)) return description;

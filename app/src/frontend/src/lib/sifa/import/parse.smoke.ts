@@ -6,6 +6,7 @@ import {
   itemsToLines,
   detectReconciliation,
   looksLikeMissedTransaction,
+  enrichDescription,
 } from "./parse-statement";
 
 let fails = 0;
@@ -62,6 +63,37 @@ const noHeader = `2024-03-01,PICK N PAY,-230.00
 const c = parseCsv(noHeader);
 eq("2 rows", c.rows.length, 2);
 eq("desc read", c.rows[0].description, "PICK N PAY");
+
+console.log("\n── CSV: year-first dates (Capitec/Nedbank exports) ──");
+eq("2024/03/01 -> 1 March", parseDate("2024/03/01"), "2024-03-01");
+eq("2024.03.01 (dot separator)", parseDate("2024.03.01"), "2024-03-01");
+const yearFirstCsv = `Date,Description,Money In,Money Out,Balance
+2024/03/01,ENGEN QUICKSHOP,,800.00,4200.00
+2024/03/02,SALARY,25000.00,,29200.00`;
+const yf = parseCsv(yearFirstCsv);
+eq("year-first CSV: both rows read", yf.rows.length, 2);
+eq("year-first CSV: date parsed", yf.rows[0].date, "2024-03-01");
+
+console.log("\n── CSV: header row after a metadata preamble (FNB-style export) ──");
+// FNB (and others) prepend account/period/opening-balance lines before the
+// real header. Assuming row 0 is the header made these preamble rows the
+// column map, so the real header row parsed as data and the running BALANCE
+// got read as the transaction amount — silently wrong, not just dropped.
+const preambleCsv = `Account Number,62123456789
+Statement Period,01 Mar 2024 to 31 Mar 2024
+Opening Balance,10000.00
+Date,Amount,Balance,Description
+2024-03-01,-450.50,9549.50,POS WOOLWORTHS`;
+const pre = parseCsv(preambleCsv);
+eq("preamble rows skipped, one txn found", pre.rows.length, 1);
+eq("real amount read, not the balance", pre.rows[0]?.amount, -450.5);
+eq("description read, not the header row", pre.rows[0]?.description, "POS WOOLWORTHS");
+
+console.log("\n── CSV: unrecognised description header doesn't collide with the date column ──");
+const unknownDescHeader = `Date,Particulars,Amount
+2024-03-01,WOOLWORTHS,-450.50`;
+const udh = parseCsv(unknownDescHeader);
+eq("description isn't the date", udh.rows[0]?.description, "WOOLWORTHS");
 
 console.log("\n── CSV: noise rows dropped ──");
 const noisy = `Date,Description,Amount
@@ -162,6 +194,97 @@ eq(
   "genuine unreadable row still warns",
   looksLikeMissedTransaction("22 Apr 26 SHELL VARSITY GARAGE 37.5O 104.81", 2026),
   true,
+);
+
+console.log("\n── two-line rows: the type label prints on the next line ──");
+// SBSA splits some rows across two printed lines: the amount line carries only
+// a terminal/reference blob, with the transaction type on the line below.
+// Judging "weak" by letter count (>=6 letters = good enough) left blobs that
+// happen to spell a suburb or a truncated payee un-enriched, so the review
+// table showed a bare terminal code and everything landed in "Other".
+
+// A pure terminal blob — no words. The withdrawal type must be recovered.
+eq(
+  "cash withdrawal label recovered",
+  enrichDescription(
+    "0000H422 2026-05-22T10:09:46 5196*9531",
+    ["0000H422 2026-05-22T10:09:46 5196*9531", "AUTOBANK CASH WITHDRAWAL AT"],
+    0,
+  ),
+  "AUTOBANK CASH WITHDRAWAL AT 0000H422 2026-05-22T10:09:46 5196*9531",
+);
+
+// "HATFIELD" is a suburb, not a merchant: 10 letters, so the old letter-count
+// rule called it "good enough" and dropped "AUTOBANK CASH DEPOSIT". One alpha
+// word wrapped in a terminal ID, timestamp and reference is a blob, not a payee.
+eq(
+  "cash deposit label recovered past a suburb name",
+  enrichDescription(
+    "HATFIELD P4 16H58 338279531",
+    ["HATFIELD P4 16H58 338279531", "AUTOBANK CASH DEPOSIT"],
+    0,
+  ),
+  "AUTOBANK CASH DEPOSIT HATFIELD P4 16H58 338279531",
+);
+
+// "STANDARDB" is a beneficiary name truncated to column width: 9 letters, one
+// token, no channel. The old rule saw enough letters and dropped the Payshap
+// label, so the user saw only "STANDARDB".
+eq(
+  "payshap-by-proxy label recovered past a truncated payee",
+  enrichDescription(
+    "STANDARDB",
+    ["STANDARDB", "PAYSHAP PAY BY PROXY"],
+    0,
+  ),
+  "PAYSHAP PAY BY PROXY STANDARDB",
+);
+
+// A real merchant already names itself — two+ words — and must be left alone
+// even though a redundant type label follows it.
+eq(
+  "real merchant is not enriched",
+  enrichDescription(
+    "SHELL VARSITY",
+    ["SHELL VARSITY", "DEBIT CARD PURCHASE FROM"],
+    0,
+  ),
+  "SHELL VARSITY",
+);
+eq(
+  "truncated-but-real merchant is not enriched",
+  enrichDescription(
+    "CHICKEN LICKE",
+    ["CHICKEN LICKE", "DEBIT CARD PURCHASE FROM"],
+    0,
+  ),
+  "CHICKEN LICKE",
+);
+// A card mask alongside a real merchant must not fool the blob detector.
+eq(
+  "merchant with a card mask is not enriched",
+  enrichDescription(
+    "SHOPRITE VEND 5196*9531 03 JUL",
+    ["SHOPRITE VEND 5196*9531 03 JUL", "FEE-ELECTRONIC ACCOUNT PAYMENT"],
+    0,
+  ),
+  "SHOPRITE VEND 5196*9531 03 JUL",
+);
+// The forward-only reading is correct for the R2.00 fee: it IS a fee, so
+// "FEE-ELECTRONIC ACCOUNT PAYMENT" is its right label. A backward lookup would
+// steal the previous row's "IB PAYMENT TO" and mislabel the fee.
+eq(
+  "digit-only fee row takes its own forward label",
+  enrichDescription(
+    "10218876171",
+    [
+      "IB PAYMENT TO",
+      "10218876171",
+      "FEE-ELECTRONIC ACCOUNT PAYMENT",
+    ],
+    1,
+  ),
+  "FEE-ELECTRONIC ACCOUNT PAYMENT 10218876171",
 );
 
 console.log("\n── reconciliation against the bank's own balances ──");
