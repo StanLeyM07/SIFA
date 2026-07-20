@@ -95,6 +95,21 @@ const unknownDescHeader = `Date,Particulars,Amount
 const udh = parseCsv(unknownDescHeader);
 eq("description isn't the date", udh.rows[0]?.description, "WOOLWORTHS");
 
+console.log("\n── CSV: a separate Fee column (Capitec-style export) ──");
+// Capitec prints bank charges in their own "Fee" column, entirely separate
+// from Money In/Money Out. A fee-only row has both of those blank, so without
+// reading this column every fee row failed the amount check and was silently
+// dropped — on a real 7-month statement that was 66 of 299 rows, every bank
+// fee on the account, with no warning that anything was missing.
+const feeColCsv = `Posting Date,Description,Money In,Money Out,Fee,Balance
+2026-01-28,ATM Cash Withdrawal,,-200.00,,225.39
+2026-01-28,ATM Cash Withdrawal Fee,,,-10.00,215.39
+2026-01-31,Interest Received,0.17,,,169.56`;
+const feeCol = parseCsv(feeColCsv);
+eq("all three rows read, none dropped as fee-only", feeCol.rows.length, 3);
+eq("fee-only row reads as an expense", feeCol.rows[1]?.amount, -10);
+eq("fee row keeps its own description", feeCol.rows[1]?.description, "ATM Cash Withdrawal Fee");
+
 console.log("\n── CSV: noise rows dropped ──");
 const noisy = `Date,Description,Amount
 2024-03-01,WOOLWORTHS,-100.00
@@ -155,6 +170,46 @@ eq(
   lineToRow("17 Jun 26 OPENAI *CHATGPT SAN FRANCISCO 20.00 18.45 369.00 4030.55", 2026)
     ?.amount,
   369,
+);
+eq(
+  "forex is unaffected even when a prevBalance is supplied (the sum doesn't validate)",
+  lineToRow("17 Jun 26 OPENAI *CHATGPT SAN FRANCISCO 20.00 18.45 369.00 4030.55", 2026, 4030.55)
+    ?.amount,
+  369,
+);
+
+console.log("\n── PDF: a fee bundled onto the transaction's own line (Capitec) ──");
+// Real Capitec line. -6 900.00 is the payment, -1.00 is its fee, both printed
+// on one line with one balance — prevBalance(7 757.67) - 6 900 - 1 = 856.67.
+// Reading this "positionally" (second-to-last of three amounts) picked the
+// R1 fee as if it were the whole payment, on a real statement turning a
+// R6 900 transfer into R1 and leaving the balance chain R21 000+ short over
+// the full document.
+const feeLine =
+  "02/03/2026 Banking App Immediate Payment: Y. Fan Digital Payments -6 900.00 -1.00 856.67";
+eq("main amount, not the fee", lineToRow(feeLine, 2026, 7757.67)?.amount, -6900);
+eq("fee captured separately, not dropped", lineToRow(feeLine, 2026, 7757.67)?.bundledFee, -1);
+eq(
+  "known Capitec fee-bundled phrase resolves correctly with NO prevBalance at all",
+  lineToRow(feeLine, 2026)?.amount,
+  -6900,
+);
+eq(
+  "unrecognised phrase, no prevBalance to verify against: falls back to the old position guess",
+  lineToRow(
+    "02/03/2026 Some Unrecognised New Bank Feature Digital Payments -6 900.00 -1.00 856.67",
+    2026,
+  )?.amount,
+  -1,
+);
+eq(
+  "a prevBalance that doesn't explain an unrecognised line's move doesn't force a wrong split",
+  lineToRow(
+    "02/03/2026 Some Unrecognised New Bank Feature Digital Payments -6 900.00 -1.00 856.67",
+    2026,
+    0,
+  )?.amount,
+  -1,
 );
 
 console.log("\n── PDF rows split across baseline bands ──");
@@ -306,5 +361,32 @@ eq("flags a mismatch", bad?.matches, false);
 eq("reports the gap", bad?.difference, 51.17);
 
 eq("silent when balances absent", detectReconciliation(["nothing here"], []), null);
+
+console.log("\n── closing balance vs. available balance (Capitec prints both) ──");
+// Real Capitec statement: "Closing Balance: R360.71" and "Available Balance:
+// R330.71" a line apart — different concepts (available reflects a pending
+// hold), not two readings of the same figure. Matching either interchangeably
+// picked whichever appeared last in the document — coincidentally the
+// available one — leaving a R30 gap that had nothing to do with the
+// transactions being wrong.
+const capitecLines = [
+  "From Date: 01/07/2025 Opening Balance: R54.62",
+  "To Date: 20/07/2026 Closing Balance: R360.71",
+  "Print Date: 20/07/2026 18:48 Available Balance: R330.71",
+];
+const capitecRec = detectReconciliation(capitecLines, [
+  { date: "2026-01-01", description: "A", amount: 306.09 },
+]);
+eq("prefers the true closing balance over available", capitecRec?.closing, 360.71);
+eq("reconciles against it correctly", capitecRec?.matches, true);
+
+// Standard Bank never prints an explicit "Closing Balance" line — only
+// "Available Balance" — so that must still work as the fallback.
+eq(
+  "falls back to available balance when no closing wording exists",
+  detectReconciliation(recLines, [{ date: "2026-04-22", description: "A", amount: -88.67 }])
+    ?.closing,
+  16.14,
+);
 
 console.log(`\n${fails === 0 ? "ALL PASS" : fails + " FAILURES"}`);

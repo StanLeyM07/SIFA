@@ -14,6 +14,15 @@ export interface ParsedRow {
   date: string; // ISO yyyy-mm-dd
   description: string;
   amount: number; // signed: negative = money out
+  /**
+   * A bank fee printed on the same PDF line as this transaction rather than
+   * getting its own row — Capitec does this for ATM withdrawals, immediate
+   * payments and external payments. CSV fees always already arrive as their
+   * own row, so this is PDF-only. parsePdf splits it into a second ParsedRow
+   * of its own: leaving it attached here would silently drop it from every
+   * total, since only `amount` is ever summed.
+   */
+  bundledFee?: number;
 }
 
 export interface ParseResult {
@@ -240,7 +249,17 @@ function isNoise(line: string): boolean {
 // ── Reconciliation ───────────────────────────────────────────
 
 const OPENING_RE = /(?:statement\s+)?opening balance|balance brought forward|balance b\/f/i;
-const CLOSING_RE = /(?:statement\s+)?closing balance|balance carried forward|available balance|balance c\/f/i;
+// A statement's closing balance is what transactions should reconcile
+// against. Available balance is a different figure — it reflects pending
+// holds — that can differ from closing by design, not by parsing error. A
+// real Capitec statement prints both a line apart ("Closing Balance:
+// R360.71", "Available Balance: R330.71"); matching them interchangeably
+// picked whichever happened to appear last rather than the authoritative
+// one. True closing wording is preferred; available balance is kept only as
+// the fallback for statements (Standard Bank) that never print an explicit
+// closing figure at all.
+const TRUE_CLOSING_RE = /(?:statement\s+)?closing balance|balance carried forward|balance c\/f/i;
+const AVAILABLE_BALANCE_RE = /available balance/i;
 
 /** Last money-shaped token on a line — balances are printed at the right. */
 function trailingAmount(line: string): number | null {
@@ -260,19 +279,24 @@ export function detectReconciliation(
 ): ParseResult["reconciliation"] {
   let opening: number | null = null;
   let closing: number | null = null;
+  let availableFallback: number | null = null;
 
   for (const line of lines) {
     if (opening === null && OPENING_RE.test(line)) {
       const v = trailingAmount(line);
       if (v !== null) opening = v;
     }
-    if (CLOSING_RE.test(line)) {
+    if (TRUE_CLOSING_RE.test(line)) {
       const v = trailingAmount(line);
       // Take the last closing-shaped figure; statements repeat it per page.
       if (v !== null) closing = v;
+    } else if (AVAILABLE_BALANCE_RE.test(line)) {
+      const v = trailingAmount(line);
+      if (v !== null) availableFallback = v;
     }
   }
 
+  if (closing === null) closing = availableFallback;
   if (opening === null || closing === null) return null;
 
   const net = rows.reduce((s, r) => s + r.amount, 0);
@@ -294,6 +318,13 @@ const DESC_HEADERS = ["description", "narrative", "details", "reference", "trans
 const AMOUNT_HEADERS = ["amount", "value", "transaction amount"];
 const DEBIT_HEADERS = ["debit", "money out", "withdrawal", "paid out"];
 const CREDIT_HEADERS = ["credit", "money in", "deposit", "paid in"];
+// Capitec's CSV export prints bank charges in their own "Fee" column, entirely
+// separate from Money In/Money Out — a fee-only row ("ATM Cash Withdrawal
+// Fee", "Monthly Account Admin Fee") has both of those blank. Without reading
+// this column every such row fails the amount check and is silently dropped:
+// on a real 7-month Capitec statement that was 66 of 299 rows — every bank
+// fee on the account, a fifth of the whole statement, gone with no warning.
+const FEE_HEADERS = ["fee", "fees"];
 
 const findCol = (headers: string[], candidates: string[]) =>
   headers.findIndex((h) => candidates.some((c) => h === c)) >= 0
@@ -344,6 +375,7 @@ export function parseCsv(text: string): ParseResult {
   let amountCol = 2;
   let debitCol = -1;
   let creditCol = -1;
+  let feeCol = -1;
 
   if (hasHeader) {
     dateCol = Math.max(0, findCol(headers, DATE_HEADERS));
@@ -355,6 +387,7 @@ export function parseCsv(text: string): ParseResult {
     amountCol = findCol(headers, AMOUNT_HEADERS);
     debitCol = findCol(headers, DEBIT_HEADERS);
     creditCol = findCol(headers, CREDIT_HEADERS);
+    feeCol = findCol(headers, FEE_HEADERS);
   }
 
   const out: ParsedRow[] = [];
@@ -373,12 +406,17 @@ export function parseCsv(text: string): ParseResult {
     }
 
     let amount: number | null = null;
-    if (debitCol >= 0 || creditCol >= 0) {
-      // Separate debit/credit columns: whichever is populated wins.
+    if (debitCol >= 0 || creditCol >= 0 || feeCol >= 0) {
+      // Separate debit/credit/fee columns: whichever is populated wins. Fees
+      // are checked last — every sample seen has a fee on its own row with
+      // debit/credit blank, never alongside a real debit on the same line —
+      // and a fee is always money out.
       const debit = debitCol >= 0 ? parseAmount(cols[debitCol] ?? "") : null;
       const credit = creditCol >= 0 ? parseAmount(cols[creditCol] ?? "") : null;
+      const fee = feeCol >= 0 ? parseAmount(cols[feeCol] ?? "") : null;
       if (debit) amount = -Math.abs(debit);
       else if (credit) amount = Math.abs(credit);
+      else if (fee) amount = -Math.abs(fee);
     } else if (amountCol >= 0) {
       amount = parseAmount(cols[amountCol] ?? "");
     }
@@ -454,6 +492,24 @@ export function itemsToLines(items: TextItem[], tolerance = 3): string[] {
 }
 
 /**
+ * Capitec transaction types that always print their own fee bundled onto the
+ * same line as the transaction — verified against a real statement, where
+ * every single occurrence of each phrase below had exactly three amounts
+ * (transaction, fee, balance), no exceptions. Checking the phrase is a
+ * direct, "certain" signal: unlike the balance-chain check below, it doesn't
+ * need the previous row to have parsed correctly, so it still works on a
+ * statement's very first transaction — which has no previous balance to
+ * verify against — or right after any other row that failed to parse.
+ *
+ * Not exhaustive on purpose. "Online Purchase: Amazon"/"Anthropic" also
+ * bundle a fee (a forex charge) while every other "Online Purchase:" merchant
+ * doesn't, so the phrase alone can't tell those apart — that case, and any
+ * unlisted bank's equivalent, still needs the arithmetic fallback.
+ */
+const KNOWN_FEE_BUNDLED_RE =
+  /^(ATM Cash (Withdrawal|Deposit)|Cash Withdrawal:|Banking App (External|Immediate|Prepaid)|(Immediate )?Capitec Pay Payment)/i;
+
+/**
  * Pull transactions out of a reconstructed line.
  *
  * The last money-shaped token on a line is usually the running balance and the
@@ -461,7 +517,11 @@ export function itemsToLines(items: TextItem[], tolerance = 3): string[] {
  * the amount. We take the earliest amount that isn't the balance, which holds
  * for both layouts.
  */
-export function lineToRow(line: string, fallbackYear: number): ParsedRow | null {
+export function lineToRow(
+  line: string,
+  fallbackYear: number,
+  prevBalance?: number | null,
+): ParsedRow | null {
   if (isNoise(line)) return null;
 
   const dateMatch = line.match(DATE_RE);
@@ -481,7 +541,56 @@ export function lineToRow(line: string, fallbackYear: number): ParsedRow | null 
 
   if (amounts.length === 0) return null;
 
-  const chosen = amounts.length >= 2 ? amounts[amounts.length - 2] : amounts[0];
+  let chosen = amounts.length >= 2 ? amounts[amounts.length - 2] : amounts[0];
+  let bundledFee: number | undefined;
+
+  // Three or more amounts is ambiguous. Usually it's [amount, fee, balance] —
+  // Capitec prints a transaction's own fee inline on the same line for
+  // immediate payments, external payments and ATM withdrawals — but it can
+  // also be [foreign amount, rate, ZAR amount, balance] for a forex purchase.
+  // The position-only guess above picks whichever sits right before the
+  // balance, which is correct for forex and wrong for an inline fee: on a
+  // real Capitec statement it read a R6 900 payment as R1, the fee beside it.
+  //
+  // Two independent ways to tell which case this is, checked in order of how
+  // little they depend on: first the phrase itself (KNOWN_FEE_BUNDLED_RE,
+  // works in isolation, even on line one of the statement), then the balance
+  // chain (needs a verified previous row). Either being satisfied is enough.
+  //
+  // The fee isn't a separate balance step — Capitec bundles it into the same
+  // line as the transaction it belongs to, so prevBalance + amount alone never
+  // lands on the printed balance; it takes prevBalance + amount + fee. So the
+  // arithmetic check sums every candidate rather than testing them one at a
+  // time: if that sum explains the balance move, the earliest candidate is
+  // the transaction (the fee is always printed after it, on every real
+  // example seen) — a fee is money the transaction cost, not a separate thing
+  // that happened. Neither check succeeding falls back to the position guess,
+  // so nothing regresses for statements where it was already correct.
+  //
+  // The fee itself still has to be recorded somewhere: it's real money out
+  // that would otherwise vanish, since only `amount` is ever summed. It comes
+  // back as `bundledFee` for parsePdf to turn into a row of its own — that
+  // was the whole remaining gap after fixing which figure was "the" amount:
+  // right transaction, but the fee beside it was validated and then silently
+  // discarded, undercounting real spending by exactly what was missing.
+  if (amounts.length >= 3) {
+    const balance = amounts[amounts.length - 1].value;
+    const candidates = amounts.slice(0, -1);
+    const leadText = line
+      .slice((dateMatch.index ?? 0) + dateMatch[1].length, amounts[0].index)
+      .trim();
+    const sum = candidates.reduce((s, a) => s + (a.value ?? 0), 0);
+    const knownBundled = KNOWN_FEE_BUNDLED_RE.test(leadText);
+    const chainVerified =
+      prevBalance != null && balance !== null && Math.abs(prevBalance + sum - balance) < 0.01;
+
+    if (knownBundled || chainVerified) {
+      chosen = candidates[0];
+      const feeSum = candidates.slice(1).reduce((s, a) => s + (a.value ?? 0), 0);
+      if (feeSum !== 0) bundledFee = feeSum;
+    }
+  }
+
   if (chosen.value === null) return null;
 
   // Description is what's left between the date and the first amount.
@@ -494,7 +603,7 @@ export function lineToRow(line: string, fallbackYear: number): ParsedRow | null 
 
   if (description.length < 2) return null;
 
-  return { date, description, amount: chosen.value };
+  return { date, description, amount: chosen.value, bundledFee };
 }
 
 export async function parsePdf(file: File): Promise<ParseResult> {
@@ -533,11 +642,44 @@ export async function parsePdf(file: File): Promise<ParseResult> {
 
   const rows: ParsedRow[] = [];
   let skipped = 0;
+  // Tracks the running balance across lines so lineToRow can verify an
+  // ambiguous amount by arithmetic instead of guessing its position.
+  let runningBalance: number | null = null;
+  // Capitec opens the PDF with a "Scheduled Payments" recap box highlighting
+  // a few recurring card charges — each one is printed again, in full, in the
+  // real chronological ledger further down. Parsing both double-counts every
+  // one: on a real statement that added R331.89 of spending that only
+  // happened once. The box has a fixed start and end header, so everything
+  // between is skipped outright rather than guessed at per line.
+  let inRecapBox = false;
   for (let i = 0; i < allLines.length; i++) {
     const line = allLines[i];
-    const row = lineToRow(line, fallbackYear);
+    const trimmed = line.trim();
+    if (/^scheduled payments$/i.test(trimmed)) {
+      inRecapBox = true;
+      continue;
+    }
+    if (inRecapBox) {
+      if (/^spending summary$/i.test(trimmed)) inRecapBox = false;
+      continue;
+    }
+
+    const row = lineToRow(line, fallbackYear, runningBalance);
     if (row) {
-      rows.push({ ...row, description: enrichDescription(row.description, allLines, i) });
+      const { bundledFee, ...transaction } = row;
+      rows.push({
+        ...transaction,
+        description: enrichDescription(transaction.description, allLines, i),
+      });
+      // A fee bundled onto the same line as its transaction (see lineToRow)
+      // is real money out that would otherwise never be counted — it was
+      // used to verify the arithmetic, not spent for free. Recorded as its
+      // own row, same date, so it shows up as a bank fee like every other one.
+      if (bundledFee) {
+        rows.push({ date: row.date, description: "Bank Fee", amount: bundledFee });
+      }
+      const lineBalance = trailingAmount(line);
+      if (lineBalance !== null) runningBalance = lineBalance;
     } else if (looksLikeMissedTransaction(line, fallbackYear)) {
       skipped++;
     }
