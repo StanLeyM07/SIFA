@@ -13,15 +13,23 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { useSifa, formatZAR } from "@/lib/sifa/context";
 import { computeInsights, type InsightTone } from "@/lib/sifa/insights";
+import { computePeriodStats } from "@/lib/sifa/period-stats";
 import { getCoachRead, type CoachRead } from "@/lib/sifa/coach/coach.service";
 import { TransactionSheet } from "@/components/sifa/transaction-sheet";
-import { isMoneyMovement, type Transaction } from "@/lib/sifa/types";
+import { type Transaction } from "@/lib/sifa/types";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: DashboardPage,
 });
 
 const PIE_COLORS = ["#2F6F5E", "#1E4B3F", "#D89A3D", "#B45B47", "#7A7263", "#16231C"];
+
+const PERIODS = [
+  { months: 1, label: "This month" },
+  { months: 3, label: "3 months" },
+  { months: 6, label: "6 months" },
+  { months: 12, label: "12 months" },
+] as const;
 
 const TONE_ICON: Record<InsightTone, typeof Sparkles> = {
   critical: AlertTriangle,
@@ -43,34 +51,14 @@ function DashboardPage() {
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [coach, setCoach] = useState<CoachRead | null>(null);
   const [coachLoading, setCoachLoading] = useState(false);
+  // Defaults to the current month only — everything below (headline coach
+  // read, upcoming bills) still scopes to "this month" regardless of this;
+  // it's just the three headline numbers and the category breakdown that
+  // widen with it.
+  const [months, setMonths] = useState<(typeof PERIODS)[number]["months"]>(1);
 
-  const stats = useMemo(() => {
-    const now = new Date();
-    const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    // Internal transfers are movement, not earning or spending — including
-    // them made a real statement report R6 607 income against R990 actual,
-    // and an overspend that was really money moved to a second account.
-    const monthTx = transactions.filter(
-      (t) => t.date.slice(0, 7) === key && !isMoneyMovement(t.category),
-    );
-
-    const income = monthTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-    const expenses = monthTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-    const saved = income - expenses;
-    const savedPct = income > 0 ? Math.round((saved / income) * 100) : 0;
-
-    const byCat = new Map<string, number>();
-    for (const t of monthTx) {
-      if (t.type !== "expense") continue;
-      byCat.set(t.category, (byCat.get(t.category) ?? 0) + t.amount);
-    }
-    const pie = [...byCat.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([name, value]) => ({ name, value }));
-
-    return { income, expenses, saved, savedPct, pie, count: monthTx.length };
-  }, [transactions]);
+  const stats = useMemo(() => computePeriodStats(transactions, months), [transactions, months]);
+  const periodPhrase = months === 1 ? "this month" : `in the last ${months} months`;
 
   const insights = useMemo(
     () => computeInsights(transactions, bills, goals),
@@ -214,31 +202,49 @@ function DashboardPage() {
       </section>
 
       {/* The three numbers that matter */}
-      <section className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-3xl border border-hair bg-card p-5">
-          <p className="text-xs font-medium uppercase tracking-widest text-muted">Came in</p>
-          <p className="mt-1.5 font-mono text-2xl font-semibold tabular-nums text-emerald">
-            {formatZAR(stats.income)}
-          </p>
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {PERIODS.map((p) => (
+            <button
+              key={p.months}
+              onClick={() => setMonths(p.months)}
+              className={`min-h-[32px] rounded-full px-3.5 text-xs font-semibold transition ${
+                months === p.months
+                  ? "bg-ink text-paper"
+                  : "border border-hair bg-card text-muted hover:border-emerald hover:text-ink"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
-        <div className="rounded-3xl border border-hair bg-card p-5">
-          <p className="text-xs font-medium uppercase tracking-widest text-muted">Went out</p>
-          <p className="mt-1.5 font-mono text-2xl font-semibold tabular-nums text-brick">
-            {formatZAR(stats.expenses)}
-          </p>
-        </div>
-        <div className="rounded-3xl border border-hair bg-card p-5">
-          <p className="text-xs font-medium uppercase tracking-widest text-muted">Left over</p>
-          <p
-            className={`mt-1.5 font-mono text-2xl font-semibold tabular-nums ${
-              stats.saved >= 0 ? "text-ink" : "text-brick"
-            }`}
-          >
-            {formatZAR(stats.saved)}
-          </p>
-          {stats.income > 0 && (
-            <p className="mt-0.5 text-xs text-muted">{stats.savedPct}% of what came in</p>
-          )}
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-3xl border border-hair bg-card p-5">
+            <p className="text-xs font-medium uppercase tracking-widest text-muted">Came in</p>
+            <p className="mt-1.5 font-mono text-2xl font-semibold tabular-nums text-emerald">
+              {formatZAR(stats.income)}
+            </p>
+          </div>
+          <div className="rounded-3xl border border-hair bg-card p-5">
+            <p className="text-xs font-medium uppercase tracking-widest text-muted">Went out</p>
+            <p className="mt-1.5 font-mono text-2xl font-semibold tabular-nums text-brick">
+              {formatZAR(stats.expenses)}
+            </p>
+          </div>
+          <div className="rounded-3xl border border-hair bg-card p-5">
+            <p className="text-xs font-medium uppercase tracking-widest text-muted">Left over</p>
+            <p
+              className={`mt-1.5 font-mono text-2xl font-semibold tabular-nums ${
+                stats.saved >= 0 ? "text-ink" : "text-brick"
+              }`}
+            >
+              {formatZAR(stats.saved)}
+            </p>
+            {stats.income > 0 && (
+              <p className="mt-0.5 text-xs text-muted">{stats.savedPct}% of what came in</p>
+            )}
+          </div>
         </div>
       </section>
 
@@ -248,7 +254,7 @@ function DashboardPage() {
           <h2 className="font-display text-xl font-semibold">Where it went</h2>
           {stats.pie.length === 0 ? (
             <p className="mt-6 text-sm text-muted">
-              Nothing recorded this month yet.
+              Nothing recorded {periodPhrase} yet.
             </p>
           ) : (
             <div className="mt-4 grid items-center gap-4 sm:grid-cols-[150px_1fr]">
