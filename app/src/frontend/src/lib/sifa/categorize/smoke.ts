@@ -165,6 +165,21 @@ for (const [desc, amt] of [
   console.log(`${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 44)} -> ${m.category}`);
 }
 
+// Capitec's automatic Live Better round-ups/sweeps, verified against a real
+// 7-month CSV export. The generic TRANSFER-FROM-SAVINGS rule above doesn't
+// catch these because "Live Better" sits between FROM and Savings Account.
+console.log("\n── Capitec Live Better round-ups/sweeps ──");
+for (const [desc, amt] of [
+  ["Live Better Round-up Transfer", -1.1],
+  ["Live Better Interest Sweep", -0.17],
+  ["Banking App Transfer from Live Better Savings Account (1816119146)", 2.28],
+] as Array<[string, number]>) {
+  const m = categorizeOne(desc, amt);
+  const ok = m.category === "Transfers";
+  if (!ok) fails++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${desc.slice(0, 60)} -> ${m.category}`);
+}
+
 // The load-bearing distinction: a PAYMENT is money leaving for someone else,
 // so it must stay real spending. Treating it as movement would erase genuine
 // expenses from every total.

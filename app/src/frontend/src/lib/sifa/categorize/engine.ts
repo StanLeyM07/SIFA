@@ -40,9 +40,9 @@ const CONFIDENCE: Record<MatchSource, number> = {
  * So "PAYMENT" is deliberately excluded below — treating it as movement
  * would erase genuine spending from every total.
  *
- * Only the Standard Bank wording is confirmed against a real statement. The
- * other patterns are best-effort for FNB/Capitec/Absa/Nedbank; when one is
- * wrong the user recategorises it once and the correction is remembered.
+ * Standard Bank and Capitec wording are both confirmed against real
+ * statements. The rest is best-effort for FNB/Absa/Nedbank; when one is wrong
+ * the user recategorises it once and the correction is remembered.
  */
 const INTERNAL_TRANSFER_RE = new RegExp(
   [
@@ -55,6 +55,14 @@ const INTERNAL_TRANSFER_RE = new RegExp(
     // FNB / Capitec shorthand
     String.raw`\bINT\s?TRF\b`,
     String.raw`\bTRF\s+(TO|FROM)\b`,
+    // Capitec "Live Better" — verified. Round-up Transfer and Interest Sweep
+    // move money into the user's own Live Better Savings pocket automatically
+    // on every purchase; "Transfer from Live Better Savings Account" moves it
+    // back. None of these match the generic TRANSFER-FROM-SAVINGS rule above
+    // because two words ("Live Better") sit between FROM and SAVINGS. Left
+    // unmatched, a real 7-month Capitec statement counted ~R54 of these
+    // automatic sweeps as real spending and income.
+    String.raw`\bLIVE\s+BETTER\b`,
   ].join("|"),
   "i",
 );
