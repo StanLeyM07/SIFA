@@ -1,9 +1,42 @@
 # Sifa
 
-A South African personal finance app. You drop in a bank statement; it reads it,
+**A South African personal finance app.** Drop in a bank statement; it reads it,
 sorts every transaction, and tells you what actually happened to your money.
 
 No manual data entry. No spreadsheet. Nothing uploaded.
+
+### ▶ [Try it live: sifa-beryl.vercel.app](https://sifa-beryl.vercel.app)
+
+No sign-up, no bank connection. Bring a CSV or PDF statement, or click
+*"Or add a transaction by hand"* to look around with no file at all.
+
+[![CI](https://github.com/StanLeyM07/SIFA/actions/workflows/ci.yml/badge.svg)](https://github.com/StanLeyM07/SIFA/actions/workflows/ci.yml)
+![React 19](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![TanStack Start](https://img.shields.io/badge/TanStack-Start-FF4154)
+![Express 5](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
+
+![Sifa import review screen](docs/screenshot-import-review.png)
+
+*The review step after importing a real 85-transaction Capitec statement. The
+green bar is a reconciliation check: opening balance plus every parsed
+transaction must land exactly on the statement's closing balance, or the parse
+is wrong and the user is told so.*
+
+---
+
+## For reviewers: the three things worth looking at
+
+If you are assessing this repo rather than using the app, these are the parts
+that carry the actual engineering:
+
+| What | Where | Why it is interesting |
+|---|---|---|
+| **The AI cannot state a wrong number** | [`app/src/backend/src/routes/coach.ts`](app/src/backend/src/routes/coach.ts) | Every figure the model emits is extracted and checked against a pre-computed fact sheet. Invented numbers fail the request. Written after the model claimed a R11 001 overspend in a month that ended R7 101 in credit |
+| **Statement parsing and reconciliation** | [`app/src/frontend/src/lib/sifa/import/`](app/src/frontend/src/lib/sifa/import/) | Real bank PDFs are inconsistent. The parser is checked by a balance reconciliation rather than trusted |
+| **A categoriser that learns** | [`app/src/frontend/src/lib/sifa/categorize/`](app/src/frontend/src/lib/sifa/categorize/) | User corrections persist and compound, so the work drops toward zero on repeat imports |
+
+Seven dependency-free smoke suites cover all three. `npm test` in either package.
 
 ---
 
@@ -47,19 +80,26 @@ npm run typecheck
 
 ### Tests
 
-Dependency-free smoke suites, runnable with `tsx`:
+Seven dependency-free smoke suites. No test framework, no mocking library, no
+config: each file asserts and exits non-zero on failure, which is enough at this
+size and keeps the dependency tree honest.
 
 ```bash
-cd app/src/frontend/src/lib/sifa
-npx tsx import/parse.smoke.ts        # date/amount/CSV parsing
-npx tsx import/import-selection.smoke.ts  # duplicate detection + import-count correctness
-npx tsx categorize/smoke.ts          # merchant matching + correction learning
-npx tsx coach/facts.smoke.ts         # metric correctness + privacy assertions
-npx tsx insights.smoke.ts            # deterministic insight rules
-
-cd app/src/backend/src/routes
-npx tsx coach.smoke.ts               # anti-hallucination guard
+cd app/src/frontend && npm test    # 6 suites
+cd app/src/backend  && npm test    # 1 suite
 ```
+
+Both run in CI on every push and pull request.
+
+| Suite | Covers |
+|---|---|
+| `import/parse.smoke.ts` | date and amount parsing, CSV shapes |
+| `import/import-selection.smoke.ts` | duplicate detection, import-count correctness |
+| `categorize/smoke.ts` | merchant matching, correction learning |
+| `coach/facts.smoke.ts` | metric correctness, privacy assertions |
+| `insights.smoke.ts` | deterministic insight rules |
+| `period-stats.smoke.ts` | period aggregation, divide-by-zero on no income |
+| `backend/routes/coach.smoke.ts` | the anti-hallucination guard |
 
 ## The two things that make this trustworthy
 
